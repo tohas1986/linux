@@ -1,0 +1,414 @@
+// SPDX-License-Identifier: GPL-2.0
+// Copyright (c) 2017 Intel Corporation
+/dts-v1/;
+
+#include "aspeed-g6.dtsi"
+#include "aspeed-g6-pinctrl.dtsi"
+#include <dt-bindings/gpio/aspeed-gpio.h>
+#include <dt-bindings/leds/leds-pca955x.h>
+
+/ {
+	model = "OpenYard_BMC";
+	compatible = "intel,s2600wf-bmc", "aspeed,ast2600";
+
+	chosen {
+		stdout-path = &uart5;
+		bootargs = "earlycon";
+	};
+
+	memory@80000000 {
+		device_type = "memory";
+		reg = <0x80000000 0x80000000>;
+	};
+
+	leds {
+        compatible = "gpio-leds";
+
+        // UID led
+        identify {
+            default-state = "off";
+            gpios = <&gpio0 ASPEED_GPIO(G, 0) GPIO_ACTIVE_LOW>;
+        };
+
+        // Heart beat led
+        heartbeat {
+        	label = "HB_LED";
+         	gpios = <&gpio0 ASPEED_GPIO(P, 7) GPIO_ACTIVE_LOW>;
+			linux,default-trigger = "heartbeat";
+        };
+    };
+
+	reserved-memory {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		video_engine_memory: video {
+			size = <0x04000000>;
+			alignment = <0x01000000>;
+			compatible = "shared-dma-pool";
+			reusable;
+		};
+
+		gfx_memory: framebuffer {
+			size = <0x01000000>;
+			alignment = <0x01000000>;
+			compatible = "shared-dma-pool";
+			reusable;
+		};
+	};
+
+	iio-hwmon {
+		compatible = "iio-hwmon";
+		io-channels = <&adc0 0>, <&adc0 1>, <&adc0 2>, <&adc0 3>,
+			<&adc0 4>, <&adc0 5>, <&adc0 6>, <&adc0 7>,
+			<&adc1 0>, <&adc1 1>, <&adc1 2>, <&adc1 3>,
+			<&adc1 4>, <&adc1 5>, <&adc1 6>, <&adc1 7>;
+	};
+
+};
+
+&fmc {
+	status = "okay";
+	flash@0 {
+		status = "okay";
+		m25p,fast-read;
+		label = "bmc";
+		spi-rx-bus-width = <4>;
+		spi-max-frequency = <50000000>;
+#include "openbmc-flash-layout-64.dtsi"
+	};
+};
+
+&spi1 {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_spi1_default>;
+
+	flash@0 {
+		status = "okay";
+		m25p,fast-read;
+		label = "pnor";
+	};
+};
+
+&uart1 {
+	/* Rear RS-232 connector */
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_txd1_default
+			&pinctrl_rxd1_default
+			&pinctrl_nrts1_default
+			&pinctrl_ndtr1_default
+			&pinctrl_ndsr1_default
+			&pinctrl_ncts1_default
+			&pinctrl_ndcd1_default
+			&pinctrl_nri1_default>;
+};
+
+&uart5 {
+	status = "okay";
+};
+
+
+&mdio0 {
+	status = "okay";
+	ethphy0: ethernet-phy@0 {
+		compatible = "ethernet-phy-ieee802.3-c22";
+		reg = <0>;
+	};	
+};
+
+&mac0 {
+	status = "okay";
+
+	phy-mode = "rgmii";
+	phy-handle = <&ethphy0>;
+
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_rgmii1_default>;
+};
+
+&mac2 {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_rmii3_default>;
+	clocks = <&syscon ASPEED_CLK_GATE_MAC3CLK>,
+		 <&syscon ASPEED_CLK_MAC3RCLK>;
+	clock-names = "MACCLK", "RCLK";
+	use-ncsi;
+};
+
+&adc0 {
+	vref = <2500>;
+	status = "okay";
+
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_adc0_default &pinctrl_adc1_default
+		&pinctrl_adc2_default &pinctrl_adc3_default
+		&pinctrl_adc4_default &pinctrl_adc5_default
+		&pinctrl_adc6_default &pinctrl_adc7_default>;
+};
+
+&adc1 {
+	vref = <2500>;
+	status = "okay";
+
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_adc8_default &pinctrl_adc9_default
+		&pinctrl_adc10_default &pinctrl_adc11_default
+		&pinctrl_adc12_default &pinctrl_adc13_default
+		&pinctrl_adc14_default &pinctrl_adc15_default>;
+};
+
+&vhub {
+	status = "okay";
+};
+
+&ehci1 {
+	status = "okay";
+};
+
+&peci0 {
+	status = "okay";
+};
+
+&kcs3 {
+	status = "okay";
+	aspeed,lpc-io-reg = <0xca2>;
+};
+
+&lpc_snoop {
+	status = "okay";
+	snoop-ports = <0x80>, <0x81>;
+};
+
+&lpc_ctrl {
+	status = "okay";
+};
+
+&i2c0 {
+	status = "okay";
+};
+//
+&i2c1 {
+	//Need TCA9548 descriptor
+	status = "okay";
+		i2c-mux@73 {
+		compatible = "nxp,pca9548";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0x73>;
+		i2c-mux-idle-disconnect;
+
+		pcie_slo1: i2c@1 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0x1>;
+		};
+	
+		pcie_slo2: i2c@2 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0x2>;
+		};
+		
+		pcie_slo3: i2c@3 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0x3>;
+		};
+
+		ocp30: i2c@4 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0x4>;
+		};
+
+		ocp20: i2c@5 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0x5>;
+		};
+
+		u20: i2c@6 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0x6>;
+		};
+
+		u21: i2c@7 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0x7>;
+		};
+
+		lan: i2c@8 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0x8>;
+		};
+	};
+};
+//
+&i2c2 {
+	status = "okay";
+};
+//
+&i2c3 {
+	//SPD Debug
+	status = "disabled";
+};
+//
+&i2c4 {
+	status = "okay";
+};
+//
+&i2c5 {
+	//Need GPIOS5 as "0"
+	status = "okay";
+	/* PSU1 @ 0xB0 */
+	power-supply@58 {
+		compatible = "inspur,ipsps1";
+		reg = <0x58>;
+	};
+
+	/* PSU2 @ 0xB2 */
+	/*power-supply@51 {
+		compatible = "inspur,ipsps1";
+		reg = <0x51>;
+	};*/
+};
+//
+&i2c6 {
+	//Need ina219 [80,82,88]
+	status = "okay";
+	Current_Meter_GPU@40 {
+		compatible = "ti,ina219";
+		reg = <0x40>;
+		shunt-resistor = <1000>; /* = 1 mOhm */
+	};
+	Current_Meter_GPU@41 {
+		compatible = "ti,ina219";
+		reg = <0x42>;
+		shunt-resistor = <1000>; /* = 1 mOhm */
+	};
+	Current_Meter_GPU@44 {
+		compatible = "ti,ina219";
+		reg = <0x48>;
+		shunt-resistor = <1000>; /* = 1 mOhm */
+	};
+};
+//
+&i2c7 {
+	//FRU AT24C256 and PFR
+	status = "disabled";
+};
+//
+&i2c8 {
+	status = "okay";
+};
+//
+&i2c9 {
+	status = "disabled";
+};
+//
+&i2c10 {
+	status = "disabled";
+};
+//
+&i2c11 {
+	status = "okay";
+};
+//
+&i2c12 {
+	status = "okay";
+};
+//
+&i2c13 {
+	status = "disabled";
+};
+//
+&i2c14 {
+	status = "disabled";
+};
+//
+&i2c15 {
+	status = "disabled";
+};
+//
+//&gfx {
+//	status = "okay";
+//};
+//
+//&pinctrl {
+//	aspeed,external-nodes = <&gfx &lhc>;
+//};
+
+//&pwm_tacho {
+//	status = "okay";
+//	pinctrl-names = "default";
+//	pinctrl-0 = <&pinctrl_pwm0_default &pinctrl_pwm1_default
+//			 &pinctrl_pwm2_default &pinctrl_pwm3_default
+//			 &pinctrl_pwm4_default &pinctrl_pwm5_default
+//			 &pinctrl_pwm6_default &pinctrl_pwm7_default>;
+//};
+
+&sgpiom0 {
+	status = "okay";
+	ngpios = <128>;
+	bus-frequency = <48000>;
+	gpio-line-names =
+	/* SGPIO input lines */
+	/*IOA0-IOA7*/	"","", "","", "","", "","", "","", "","", "","", "","",
+	/*IOB0-IOB7*/	"","", "","", "","", "","", "","", "","", "","", "","",
+	/*IOC0-IOC7*/	"","", "","", "","", "","", "","", "","", "","", "","",
+	/*IOD0-IOD7*/	"","", "","", "","", "","", "","", "","", "","", "","",
+	/*IOE0-IOE7*/	"","", "","", "","", "","", "","", "","", "","", "","",
+	/*IOF0-IOF7*/	"","", "","", "","", "","", "","", "","", "","", "","",
+	/*IOG0-IOG7*/	"","", "","", "","", "","", "","", "","", "","", "","",
+	/*IOH0-IOH7*/	"","", "","", "","", "","", "","", "","", "","", "","",
+	/*IOI0-IOI7*/	"","", "","", "","", "","", "","", "","", "","", "","",
+	/*IOJ0-IOJ7*/	"","", "","", "","", "","", "","", "","", "","", "","",
+	/*IOK0-IOK7*/	"","", "","", "","", "","", "","", "","", "","", "","",
+	/*IOL0-IOL7*/	"","", "","", "","", "","", "","", "","", "","", "","",
+	/*IOM0-IOM7*/	"","", "","", "","", "","", "","", "","", "","", "","",
+	/*ION0-ION7*/	"","", "","", "","", "","", "","", "","", "","", "","",
+	/*IOO0-IOO7*/	"","", "","", "","", "","", "","", "","", "","", "","",
+	/*IOP0-IOP7*/	"","", "","", "","", "","", "","", "","", "","", "","";
+};
+
+
+&pwm_tacho {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_pwm0_default &pinctrl_tach0_default
+			&pinctrl_pwm1_default &pinctrl_tach1_default>;
+
+	fan@0 {
+		reg = <0x00>;
+		aspeed,pwm-freq = <25000>;
+		cooling-levels = /bits/ 8 <125 151 177 203 229 255>;
+		aspeed,fan-tach-ch = /bits/ 8 <0x00>;
+		aspeed,pulse-pr = <2>;
+	};
+
+	fan@1 {
+		reg = <0x01>;
+		aspeed,pwm-freq = <25000>;
+		cooling-levels = /bits/ 8 <125 151 177 203 229 255>;
+		aspeed,fan-tach-ch = /bits/ 8 <0x01>;
+		aspeed,pulse-pr = <2>;
+	};
+};
+
+&video {
+	status = "okay";
+	memory-region = <&video_engine_memory>;
+};
+
+&gfx {
+	status = "okay";
+	memory-region = <&gfx_memory>;
+};
+
