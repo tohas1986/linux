@@ -33,6 +33,7 @@
 #include <drm/drm_aperture.h>
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_drv.h>
+#include <drm/drm_fb_cma_helper.h>
 #include <drm/drm_fb_helper.h>
 #include <drm/drm_vblank.h>
 
@@ -85,7 +86,7 @@ static int vc5_dumb_create(struct drm_file *file_priv,
 	if (ret)
 		return ret;
 
-	return drm_gem_dma_dumb_create_internal(file_priv, dev, args);
+	return drm_gem_cma_dumb_create_internal(file_priv, dev, args);
 }
 
 static int vc4_get_param_ioctl(struct drm_device *dev, void *data,
@@ -211,7 +212,7 @@ static const struct drm_driver vc4_drm_driver = {
 
 	.gem_create_object = vc4_create_object,
 
-	DRM_GEM_DMA_DRIVER_OPS_WITH_DUMB_CREATE(vc4_bo_dumb_create),
+	DRM_GEM_CMA_DRIVER_OPS_WITH_DUMB_CREATE(vc4_bo_dumb_create),
 
 	.ioctls = vc4_drm_ioctls,
 	.num_ioctls = ARRAY_SIZE(vc4_drm_ioctls),
@@ -234,7 +235,7 @@ static const struct drm_driver vc5_drm_driver = {
 	.debugfs_init = vc4_debugfs_init,
 #endif
 
-	DRM_GEM_DMA_DRIVER_OPS_WITH_DUMB_CREATE(vc5_dumb_create),
+	DRM_GEM_CMA_DRIVER_OPS_WITH_DUMB_CREATE(vc5_dumb_create),
 
 	.fops = &vc4_drm_fops,
 
@@ -323,9 +324,7 @@ static int vc4_drm_bind(struct device *dev)
 	INIT_LIST_HEAD(&vc4->debugfs_list);
 
 	if (!is_vc5) {
-		ret = drmm_mutex_init(drm, &vc4->bin_bo_lock);
-		if (ret)
-			return ret;
+		mutex_init(&vc4->bin_bo_lock);
 
 		ret = vc4_bo_cache_init(drm);
 		if (ret)
@@ -400,7 +399,8 @@ static void vc4_drm_unbind(struct device *dev)
 {
 	struct drm_device *drm = dev_get_drvdata(dev);
 
-	drm_dev_unplug(drm);
+	drm_dev_unregister(drm);
+
 	drm_atomic_helper_shutdown(drm);
 }
 

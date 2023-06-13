@@ -27,7 +27,6 @@
 #define __DAL_HUBP_H__
 
 #include "mem_input.h"
-#include "cursor_reg_cache.h"
 
 #define OPP_ID_INVALID 0xf
 #define MAX_TTU 0xffffff
@@ -66,10 +65,6 @@ struct hubp {
 	struct dc_cursor_attributes curs_attr;
 	struct dc_cursor_position curs_pos;
 	bool power_gated;
-
-	struct cursor_position_cache_hubp  pos;
-	struct cursor_attribute_cache_hubp att;
-	struct cursor_rect cur_rect;
 };
 
 struct surface_flip_registers {

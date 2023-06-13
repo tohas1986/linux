@@ -41,7 +41,6 @@
 #include <net/gro.h>
 #include <net/udp.h>
 #include <net/tcp.h>
-#include <net/xdp_sock_drv.h>
 #include "en.h"
 #include "en/txrx.h"
 #include "en_tc.h"
@@ -50,7 +49,6 @@
 #include "en/rep/tc.h"
 #include "ipoib/ipoib.h"
 #include "en_accel/ipsec.h"
-#include "en_accel/macsec.h"
 #include "en_accel/ipsec_rxtx.h"
 #include "en_accel/ktls_txrx.h"
 #include "en/xdp.h"
@@ -239,58 +237,67 @@ static inline bool mlx5e_rx_cache_put(struct mlx5e_rq *rq, struct page *page)
 		return false;
 	}
 
-	cache->page_cache[cache->tail] = page;
+	cache->page_cache[cache->tail].page = page;
+	cache->page_cache[cache->tail].addr = page_pool_get_dma_addr(page);
 	cache->tail = tail_next;
 	return true;
 }
 
-static inline bool mlx5e_rx_cache_get(struct mlx5e_rq *rq, union mlx5e_alloc_unit *au)
+static inline bool mlx5e_rx_cache_get(struct mlx5e_rq *rq,
+				      struct mlx5e_dma_info *dma_info)
 {
 	struct mlx5e_page_cache *cache = &rq->page_cache;
 	struct mlx5e_rq_stats *stats = rq->stats;
-	dma_addr_t addr;
 
 	if (unlikely(cache->head == cache->tail)) {
 		stats->cache_empty++;
 		return false;
 	}
 
-	if (page_ref_count(cache->page_cache[cache->head]) != 1) {
+	if (page_ref_count(cache->page_cache[cache->head].page) != 1) {
 		stats->cache_busy++;
 		return false;
 	}
 
-	au->page = cache->page_cache[cache->head];
+	*dma_info = cache->page_cache[cache->head];
 	cache->head = (cache->head + 1) & (MLX5E_CACHE_SIZE - 1);
 	stats->cache_reuse++;
 
-	addr = page_pool_get_dma_addr(au->page);
-	/* Non-XSK always uses PAGE_SIZE. */
-	dma_sync_single_for_device(rq->pdev, addr, PAGE_SIZE, rq->buff.map_dir);
+	dma_sync_single_for_device(rq->pdev, dma_info->addr,
+				   PAGE_SIZE,
+				   DMA_FROM_DEVICE);
 	return true;
 }
 
-static inline int mlx5e_page_alloc_pool(struct mlx5e_rq *rq, union mlx5e_alloc_unit *au)
+static inline int mlx5e_page_alloc_pool(struct mlx5e_rq *rq,
+					struct mlx5e_dma_info *dma_info)
 {
-	dma_addr_t addr;
-
-	if (mlx5e_rx_cache_get(rq, au))
+	if (mlx5e_rx_cache_get(rq, dma_info))
 		return 0;
 
-	au->page = page_pool_dev_alloc_pages(rq->page_pool);
-	if (unlikely(!au->page))
+	dma_info->page = page_pool_dev_alloc_pages(rq->page_pool);
+	if (unlikely(!dma_info->page))
 		return -ENOMEM;
 
-	/* Non-XSK always uses PAGE_SIZE. */
-	addr = dma_map_page(rq->pdev, au->page, 0, PAGE_SIZE, rq->buff.map_dir);
-	if (unlikely(dma_mapping_error(rq->pdev, addr))) {
-		page_pool_recycle_direct(rq->page_pool, au->page);
-		au->page = NULL;
+	dma_info->addr = dma_map_page_attrs(rq->pdev, dma_info->page, 0, PAGE_SIZE,
+					    rq->buff.map_dir, DMA_ATTR_SKIP_CPU_SYNC);
+	if (unlikely(dma_mapping_error(rq->pdev, dma_info->addr))) {
+		page_pool_recycle_direct(rq->page_pool, dma_info->page);
+		dma_info->page = NULL;
 		return -ENOMEM;
 	}
-	page_pool_set_dma_addr(au->page, addr);
+	page_pool_set_dma_addr(dma_info->page, dma_info->addr);
 
 	return 0;
+}
+
+static inline int mlx5e_page_alloc(struct mlx5e_rq *rq,
+				   struct mlx5e_dma_info *dma_info)
+{
+	if (rq->xsk_pool)
+		return mlx5e_xsk_page_alloc_pool(rq, dma_info);
+	else
+		return mlx5e_page_alloc_pool(rq, dma_info);
 }
 
 void mlx5e_page_dma_unmap(struct mlx5e_rq *rq, struct page *page)
@@ -317,18 +324,32 @@ void mlx5e_page_release_dynamic(struct mlx5e_rq *rq, struct page *page, bool rec
 	}
 }
 
+static inline void mlx5e_page_release(struct mlx5e_rq *rq,
+				      struct mlx5e_dma_info *dma_info,
+				      bool recycle)
+{
+	if (rq->xsk_pool)
+		/* The `recycle` parameter is ignored, and the page is always
+		 * put into the Reuse Ring, because there is no way to return
+		 * the page to the userspace when the interface goes down.
+		 */
+		xsk_buff_free(dma_info->xsk);
+	else
+		mlx5e_page_release_dynamic(rq, dma_info->page, recycle);
+}
+
 static inline int mlx5e_get_rx_frag(struct mlx5e_rq *rq,
 				    struct mlx5e_wqe_frag_info *frag)
 {
 	int err = 0;
 
 	if (!frag->offset)
-		/* On first frag (offset == 0), replenish page (alloc_unit actually).
-		 * Other frags that point to the same alloc_unit (with a different
+		/* On first frag (offset == 0), replenish page (dma_info actually).
+		 * Other frags that point to the same dma_info (with a different
 		 * offset) should just use the new one without replenishing again
 		 * by themselves.
 		 */
-		err = mlx5e_page_alloc_pool(rq, frag->au);
+		err = mlx5e_page_alloc(rq, frag->di);
 
 	return err;
 }
@@ -338,7 +359,7 @@ static inline void mlx5e_put_rx_frag(struct mlx5e_rq *rq,
 				     bool recycle)
 {
 	if (frag->last_in_page)
-		mlx5e_page_release_dynamic(rq, frag->au->page, recycle);
+		mlx5e_page_release(rq, frag->di, recycle);
 }
 
 static inline struct mlx5e_wqe_frag_info *get_frag(struct mlx5e_rq *rq, u16 ix)
@@ -354,7 +375,6 @@ static int mlx5e_alloc_rx_wqe(struct mlx5e_rq *rq, struct mlx5e_rx_wqe_cyc *wqe,
 	int i;
 
 	for (i = 0; i < rq->wqe.info.num_frags; i++, frag++) {
-		dma_addr_t addr;
 		u16 headroom;
 
 		err = mlx5e_get_rx_frag(rq, frag);
@@ -362,8 +382,8 @@ static int mlx5e_alloc_rx_wqe(struct mlx5e_rq *rq, struct mlx5e_rx_wqe_cyc *wqe,
 			goto free_frags;
 
 		headroom = i == 0 ? rq->buff.headroom : 0;
-		addr = page_pool_get_dma_addr(frag->au->page);
-		wqe->data[i].addr = cpu_to_be64(addr + frag->offset + headroom);
+		wqe->data[i].addr = cpu_to_be64(frag->di->addr +
+						frag->offset + headroom);
 	}
 
 	return 0;
@@ -381,15 +401,6 @@ static inline void mlx5e_free_rx_wqe(struct mlx5e_rq *rq,
 {
 	int i;
 
-	if (rq->xsk_pool) {
-		/* The `recycle` parameter is ignored, and the page is always
-		 * put into the Reuse Ring, because there is no way to return
-		 * the page to the userspace when the interface goes down.
-		 */
-		xsk_buff_free(wi->au->xsk);
-		return;
-	}
-
 	for (i = 0; i < rq->wqe.info.num_frags; i++, wi++)
 		mlx5e_put_rx_frag(rq, wi, recycle);
 }
@@ -401,78 +412,84 @@ static void mlx5e_dealloc_rx_wqe(struct mlx5e_rq *rq, u16 ix)
 	mlx5e_free_rx_wqe(rq, wi, false);
 }
 
-static int mlx5e_alloc_rx_wqes(struct mlx5e_rq *rq, u16 ix, int wqe_bulk)
+static int mlx5e_alloc_rx_wqes(struct mlx5e_rq *rq, u16 ix, u8 wqe_bulk)
 {
 	struct mlx5_wq_cyc *wq = &rq->wqe.wq;
+	int err;
 	int i;
 
-	for (i = 0; i < wqe_bulk; i++) {
-		int j = mlx5_wq_cyc_ctr2ix(wq, ix + i);
-		struct mlx5e_rx_wqe_cyc *wqe;
+	if (rq->xsk_pool) {
+		int pages_desired = wqe_bulk << rq->wqe.info.log_num_frags;
 
-		wqe = mlx5_wq_cyc_get_wqe(wq, j);
-
-		if (unlikely(mlx5e_alloc_rx_wqe(rq, wqe, j)))
-			break;
+		/* Check in advance that we have enough frames, instead of
+		 * allocating one-by-one, failing and moving frames to the
+		 * Reuse Ring.
+		 */
+		if (unlikely(!xsk_buff_can_alloc(rq->xsk_pool, pages_desired)))
+			return -ENOMEM;
 	}
 
-	return i;
+	for (i = 0; i < wqe_bulk; i++) {
+		struct mlx5e_rx_wqe_cyc *wqe = mlx5_wq_cyc_get_wqe(wq, ix + i);
+
+		err = mlx5e_alloc_rx_wqe(rq, wqe, ix + i);
+		if (unlikely(err))
+			goto free_wqes;
+	}
+
+	return 0;
+
+free_wqes:
+	while (--i >= 0)
+		mlx5e_dealloc_rx_wqe(rq, ix + i);
+
+	return err;
 }
 
 static inline void
 mlx5e_add_skb_frag(struct mlx5e_rq *rq, struct sk_buff *skb,
-		   union mlx5e_alloc_unit *au, u32 frag_offset, u32 len,
+		   struct mlx5e_dma_info *di, u32 frag_offset, u32 len,
 		   unsigned int truesize)
 {
-	dma_addr_t addr = page_pool_get_dma_addr(au->page);
-
-	dma_sync_single_for_cpu(rq->pdev, addr + frag_offset, len,
-				rq->buff.map_dir);
-	page_ref_inc(au->page);
+	dma_sync_single_for_cpu(rq->pdev,
+				di->addr + frag_offset,
+				len, DMA_FROM_DEVICE);
+	page_ref_inc(di->page);
 	skb_add_rx_frag(skb, skb_shinfo(skb)->nr_frags,
-			au->page, frag_offset, len, truesize);
+			di->page, frag_offset, len, truesize);
 }
 
 static inline void
-mlx5e_copy_skb_header(struct mlx5e_rq *rq, struct sk_buff *skb,
-		      struct page *page, dma_addr_t addr,
+mlx5e_copy_skb_header(struct device *pdev, struct sk_buff *skb,
+		      struct mlx5e_dma_info *dma_info,
 		      int offset_from, int dma_offset, u32 headlen)
 {
-	const void *from = page_address(page) + offset_from;
+	const void *from = page_address(dma_info->page) + offset_from;
 	/* Aligning len to sizeof(long) optimizes memcpy performance */
 	unsigned int len = ALIGN(headlen, sizeof(long));
 
-	dma_sync_single_for_cpu(rq->pdev, addr + dma_offset, len,
-				rq->buff.map_dir);
+	dma_sync_single_for_cpu(pdev, dma_info->addr + dma_offset, len,
+				DMA_FROM_DEVICE);
 	skb_copy_to_linear_data(skb, from, len);
 }
 
 static void
 mlx5e_free_rx_mpwqe(struct mlx5e_rq *rq, struct mlx5e_mpw_info *wi, bool recycle)
 {
-	union mlx5e_alloc_unit *alloc_units = wi->alloc_units;
 	bool no_xdp_xmit;
+	struct mlx5e_dma_info *dma_info = wi->umr.dma_info;
 	int i;
 
 	/* A common case for AF_XDP. */
-	if (bitmap_full(wi->xdp_xmit_bitmap, rq->mpwqe.pages_per_wqe))
+	if (bitmap_full(wi->xdp_xmit_bitmap, MLX5_MPWRQ_PAGES_PER_WQE))
 		return;
 
-	no_xdp_xmit = bitmap_empty(wi->xdp_xmit_bitmap, rq->mpwqe.pages_per_wqe);
+	no_xdp_xmit = bitmap_empty(wi->xdp_xmit_bitmap,
+				   MLX5_MPWRQ_PAGES_PER_WQE);
 
-	if (rq->xsk_pool) {
-		/* The `recycle` parameter is ignored, and the page is always
-		 * put into the Reuse Ring, because there is no way to return
-		 * the page to the userspace when the interface goes down.
-		 */
-		for (i = 0; i < rq->mpwqe.pages_per_wqe; i++)
-			if (no_xdp_xmit || !test_bit(i, wi->xdp_xmit_bitmap))
-				xsk_buff_free(alloc_units[i].xsk);
-	} else {
-		for (i = 0; i < rq->mpwqe.pages_per_wqe; i++)
-			if (no_xdp_xmit || !test_bit(i, wi->xdp_xmit_bitmap))
-				mlx5e_page_release_dynamic(rq, alloc_units[i].page, recycle);
-	}
+	for (i = 0; i < MLX5_MPWRQ_PAGES_PER_WQE; i++)
+		if (no_xdp_xmit || !test_bit(i, wi->xdp_xmit_bitmap))
+			mlx5e_page_release(rq, &dma_info[i], recycle);
 }
 
 static void mlx5e_post_rx_mpwqe(struct mlx5e_rq *rq, u8 n)
@@ -557,13 +574,11 @@ static int mlx5e_build_shampo_hd_umr(struct mlx5e_rq *rq,
 		header_offset = (index & (MLX5E_SHAMPO_WQ_HEADER_PER_PAGE - 1)) <<
 			MLX5E_SHAMPO_LOG_MAX_HEADER_ENTRY_SIZE;
 		if (!(header_offset & (PAGE_SIZE - 1))) {
-			union mlx5e_alloc_unit au;
-
-			err = mlx5e_page_alloc_pool(rq, &au);
+			err = mlx5e_page_alloc(rq, dma_info);
 			if (unlikely(err))
 				goto err_unmap;
-			page = dma_info->page = au.page;
-			addr = dma_info->addr = page_pool_get_dma_addr(au.page);
+			addr = dma_info->addr;
+			page = dma_info->page;
 		} else {
 			dma_info->addr = addr + header_offset;
 			dma_info->page = page;
@@ -596,7 +611,7 @@ err_unmap:
 		dma_info = &shampo->info[--index];
 		if (!(i & (MLX5E_SHAMPO_WQ_HEADER_PER_PAGE - 1))) {
 			dma_info->addr = ALIGN_DOWN(dma_info->addr, PAGE_SIZE);
-			mlx5e_page_release_dynamic(rq, dma_info->page, true);
+			mlx5e_page_release(rq, dma_info, true);
 		}
 	}
 	rq->stats->buff_alloc_err++;
@@ -644,15 +659,23 @@ static int mlx5e_alloc_rx_hd_mpwqe(struct mlx5e_rq *rq)
 
 static int mlx5e_alloc_rx_mpwqe(struct mlx5e_rq *rq, u16 ix)
 {
-	struct mlx5e_mpw_info *wi = mlx5e_get_mpw_info(rq, ix);
-	union mlx5e_alloc_unit *au = &wi->alloc_units[0];
+	struct mlx5e_mpw_info *wi = &rq->mpwqe.info[ix];
+	struct mlx5e_dma_info *dma_info = &wi->umr.dma_info[0];
 	struct mlx5e_icosq *sq = rq->icosq;
 	struct mlx5_wq_cyc *wq = &sq->wq;
 	struct mlx5e_umr_wqe *umr_wqe;
-	u32 offset; /* 17-bit value with MTT. */
 	u16 pi;
 	int err;
 	int i;
+
+	/* Check in advance that we have enough frames, instead of allocating
+	 * one-by-one, failing and moving frames to the Reuse Ring.
+	 */
+	if (rq->xsk_pool &&
+	    unlikely(!xsk_buff_can_alloc(rq->xsk_pool, MLX5_MPWRQ_PAGES_PER_WQE))) {
+		err = -ENOMEM;
+		goto err;
+	}
 
 	if (test_bit(MLX5E_RQ_STATE_SHAMPO, &rq->state)) {
 		err = mlx5e_alloc_rx_hd_mpwqe(rq);
@@ -660,39 +683,33 @@ static int mlx5e_alloc_rx_mpwqe(struct mlx5e_rq *rq, u16 ix)
 			goto err;
 	}
 
-	pi = mlx5e_icosq_get_next_pi(sq, rq->mpwqe.umr_wqebbs);
+	pi = mlx5e_icosq_get_next_pi(sq, MLX5E_UMR_WQEBBS);
 	umr_wqe = mlx5_wq_cyc_get_wqe(wq, pi);
-	memcpy(umr_wqe, &rq->mpwqe.umr_wqe, sizeof(struct mlx5e_umr_wqe));
+	memcpy(umr_wqe, &rq->mpwqe.umr_wqe, offsetof(struct mlx5e_umr_wqe, inline_mtts));
 
-	for (i = 0; i < rq->mpwqe.pages_per_wqe; i++, au++) {
-		dma_addr_t addr;
-
-		err = mlx5e_page_alloc_pool(rq, au);
+	for (i = 0; i < MLX5_MPWRQ_PAGES_PER_WQE; i++, dma_info++) {
+		err = mlx5e_page_alloc(rq, dma_info);
 		if (unlikely(err))
 			goto err_unmap;
-		addr = page_pool_get_dma_addr(au->page);
-		umr_wqe->inline_mtts[i] = (struct mlx5_mtt) {
-			.ptag = cpu_to_be64(addr | MLX5_EN_WR),
-		};
+		umr_wqe->inline_mtts[i].ptag = cpu_to_be64(dma_info->addr | MLX5_EN_WR);
 	}
 
-	bitmap_zero(wi->xdp_xmit_bitmap, rq->mpwqe.pages_per_wqe);
+	bitmap_zero(wi->xdp_xmit_bitmap, MLX5_MPWRQ_PAGES_PER_WQE);
 	wi->consumed_strides = 0;
 
 	umr_wqe->ctrl.opmod_idx_opcode =
 		cpu_to_be32((sq->pc << MLX5_WQE_CTRL_WQE_INDEX_SHIFT) |
 			    MLX5_OPCODE_UMR);
-
-	offset = (ix * rq->mpwqe.mtts_per_wqe) * sizeof(struct mlx5_mtt) / MLX5_OCTWORD;
-	umr_wqe->uctrl.xlt_offset = cpu_to_be16(offset);
+	umr_wqe->uctrl.xlt_offset =
+		cpu_to_be16(MLX5_ALIGNED_MTTS_OCTW(MLX5E_REQUIRED_MTTS(ix)));
 
 	sq->db.wqe_info[pi] = (struct mlx5e_icosq_wqe_info) {
 		.wqe_type   = MLX5E_ICOSQ_WQE_UMR_RX,
-		.num_wqebbs = rq->mpwqe.umr_wqebbs,
+		.num_wqebbs = MLX5E_UMR_WQEBBS,
 		.umr.rq     = rq,
 	};
 
-	sq->pc += rq->mpwqe.umr_wqebbs;
+	sq->pc += MLX5E_UMR_WQEBBS;
 
 	sq->doorbell_cseg = &umr_wqe->ctrl;
 
@@ -700,8 +717,8 @@ static int mlx5e_alloc_rx_mpwqe(struct mlx5e_rq *rq, u16 ix)
 
 err_unmap:
 	while (--i >= 0) {
-		au--;
-		mlx5e_page_release_dynamic(rq, au->page, true);
+		dma_info--;
+		mlx5e_page_release(rq, dma_info, true);
 	}
 
 err:
@@ -735,7 +752,7 @@ void mlx5e_shampo_dealloc_hd(struct mlx5e_rq *rq, u16 len, u16 start, bool close
 		hd_info->addr = ALIGN_DOWN(hd_info->addr, PAGE_SIZE);
 		if (hd_info->page != deleted_page) {
 			deleted_page = hd_info->page;
-			mlx5e_page_release_dynamic(rq, hd_info->page, false);
+			mlx5e_page_release(rq, hd_info, false);
 		}
 	}
 
@@ -750,7 +767,7 @@ void mlx5e_shampo_dealloc_hd(struct mlx5e_rq *rq, u16 len, u16 start, bool close
 
 static void mlx5e_dealloc_rx_mpwqe(struct mlx5e_rq *rq, u16 ix)
 {
-	struct mlx5e_mpw_info *wi = mlx5e_get_mpw_info(rq, ix);
+	struct mlx5e_mpw_info *wi = &rq->mpwqe.info[ix];
 	/* Don't recycle, this function is called on rq/netdev close */
 	mlx5e_free_rx_mpwqe(rq, wi, false);
 }
@@ -758,51 +775,38 @@ static void mlx5e_dealloc_rx_mpwqe(struct mlx5e_rq *rq, u16 ix)
 INDIRECT_CALLABLE_SCOPE bool mlx5e_post_rx_wqes(struct mlx5e_rq *rq)
 {
 	struct mlx5_wq_cyc *wq = &rq->wqe.wq;
-	int wqe_bulk, count;
-	bool busy = false;
-	u16 head;
+	u8 wqe_bulk;
+	int err;
 
 	if (unlikely(!test_bit(MLX5E_RQ_STATE_ENABLED, &rq->state)))
 		return false;
 
-	if (mlx5_wq_cyc_missing(wq) < rq->wqe.info.wqe_bulk)
+	wqe_bulk = rq->wqe.info.wqe_bulk;
+
+	if (mlx5_wq_cyc_missing(wq) < wqe_bulk)
 		return false;
 
 	if (rq->page_pool)
 		page_pool_nid_changed(rq->page_pool, numa_mem_id());
 
-	wqe_bulk = mlx5_wq_cyc_missing(wq);
-	head = mlx5_wq_cyc_get_head(wq);
+	do {
+		u16 head = mlx5_wq_cyc_get_head(wq);
 
-	/* Don't allow any newly allocated WQEs to share the same page with old
-	 * WQEs that aren't completed yet. Stop earlier.
-	 */
-	wqe_bulk -= (head + wqe_bulk) & rq->wqe.info.wqe_index_mask;
+		err = mlx5e_alloc_rx_wqes(rq, head, wqe_bulk);
+		if (unlikely(err)) {
+			rq->stats->buff_alloc_err++;
+			break;
+		}
 
-	if (!rq->xsk_pool)
-		count = mlx5e_alloc_rx_wqes(rq, head, wqe_bulk);
-	else if (likely(!rq->xsk_pool->dma_need_sync))
-		count = mlx5e_xsk_alloc_rx_wqes_batched(rq, head, wqe_bulk);
-	else
-		/* If dma_need_sync is true, it's more efficient to call
-		 * xsk_buff_alloc in a loop, rather than xsk_buff_alloc_batch,
-		 * because the latter does the same check and returns only one
-		 * frame.
-		 */
-		count = mlx5e_xsk_alloc_rx_wqes(rq, head, wqe_bulk);
-
-	mlx5_wq_cyc_push_n(wq, count);
-	if (unlikely(count != wqe_bulk)) {
-		rq->stats->buff_alloc_err++;
-		busy = true;
-	}
+		mlx5_wq_cyc_push_n(wq, wqe_bulk);
+	} while (mlx5_wq_cyc_missing(wq) >= wqe_bulk);
 
 	/* ensure wqes are visible to device before updating doorbell record */
 	dma_wmb();
 
 	mlx5_wq_cyc_update_db_record(wq);
 
-	return busy;
+	return !!err;
 }
 
 void mlx5e_free_icosq_descs(struct mlx5e_icosq *sq)
@@ -970,8 +974,7 @@ INDIRECT_CALLABLE_SCOPE bool mlx5e_post_rx_mpwqes(struct mlx5e_rq *rq)
 	head = rq->mpwqe.actual_wq_head;
 	i = missing;
 	do {
-		alloc_err = rq->xsk_pool ? mlx5e_xsk_alloc_rx_mpwqe(rq, head) :
-					   mlx5e_alloc_rx_mpwqe(rq, head);
+		alloc_err = mlx5e_alloc_rx_mpwqe(rq, head);
 
 		if (unlikely(alloc_err))
 			break;
@@ -1418,9 +1421,6 @@ static inline void mlx5e_build_rx_skb(struct mlx5_cqe64 *cqe,
 	if (unlikely(mlx5_ipsec_is_rx_flow(cqe)))
 		mlx5e_ipsec_offload_handle_rx_skb(netdev, skb, cqe);
 
-	if (unlikely(mlx5e_macsec_is_rx_flow(cqe)))
-		mlx5e_macsec_offload_handle_rx_skb(netdev, skb, cqe);
-
 	if (lro_num_seg > 1) {
 		mlx5e_lro_update_hdr(skb, cqe, cqe_bcnt);
 		skb_shinfo(skb)->gso_size = DIV_ROUND_UP(cqe_bcnt, lro_num_seg);
@@ -1524,22 +1524,20 @@ static struct sk_buff *
 mlx5e_skb_from_cqe_linear(struct mlx5e_rq *rq, struct mlx5e_wqe_frag_info *wi,
 			  u32 cqe_bcnt)
 {
-	union mlx5e_alloc_unit *au = wi->au;
+	struct mlx5e_dma_info *di = wi->di;
 	u16 rx_headroom = rq->buff.headroom;
 	struct bpf_prog *prog;
 	struct sk_buff *skb;
 	u32 metasize = 0;
 	void *va, *data;
-	dma_addr_t addr;
 	u32 frag_size;
 
-	va             = page_address(au->page) + wi->offset;
+	va             = page_address(di->page) + wi->offset;
 	data           = va + rx_headroom;
 	frag_size      = MLX5_SKB_FRAG_SZ(rx_headroom + cqe_bcnt);
 
-	addr = page_pool_get_dma_addr(au->page);
-	dma_sync_single_range_for_cpu(rq->pdev, addr, wi->offset,
-				      frag_size, rq->buff.map_dir);
+	dma_sync_single_range_for_cpu(rq->pdev, di->addr, wi->offset,
+				      frag_size, DMA_FROM_DEVICE);
 	net_prefetch(data);
 
 	prog = rcu_dereference(rq->xdp_prog);
@@ -1548,7 +1546,7 @@ mlx5e_skb_from_cqe_linear(struct mlx5e_rq *rq, struct mlx5e_wqe_frag_info *wi,
 
 		net_prefetchw(va); /* xdp_frame data area */
 		mlx5e_fill_xdp_buff(rq, va, rx_headroom, cqe_bcnt, &xdp);
-		if (mlx5e_xdp_handle(rq, au->page, prog, &xdp))
+		if (mlx5e_xdp_handle(rq, di->page, prog, &xdp))
 			return NULL; /* page/packet was consumed by XDP */
 
 		rx_headroom = xdp.data - xdp.data_hard_start;
@@ -1561,7 +1559,7 @@ mlx5e_skb_from_cqe_linear(struct mlx5e_rq *rq, struct mlx5e_wqe_frag_info *wi,
 		return NULL;
 
 	/* queue up for recycling/reuse */
-	page_ref_inc(au->page);
+	page_ref_inc(di->page);
 
 	return skb;
 }
@@ -1572,23 +1570,21 @@ mlx5e_skb_from_cqe_nonlinear(struct mlx5e_rq *rq, struct mlx5e_wqe_frag_info *wi
 {
 	struct mlx5e_rq_frag_info *frag_info = &rq->wqe.info.arr[0];
 	struct mlx5e_wqe_frag_info *head_wi = wi;
-	union mlx5e_alloc_unit *au = wi->au;
 	u16 rx_headroom = rq->buff.headroom;
+	struct mlx5e_dma_info *di = wi->di;
 	struct skb_shared_info *sinfo;
 	u32 frag_consumed_bytes;
 	struct bpf_prog *prog;
 	struct xdp_buff xdp;
 	struct sk_buff *skb;
-	dma_addr_t addr;
 	u32 truesize;
 	void *va;
 
-	va = page_address(au->page) + wi->offset;
+	va = page_address(di->page) + wi->offset;
 	frag_consumed_bytes = min_t(u32, frag_info->frag_size, cqe_bcnt);
 
-	addr = page_pool_get_dma_addr(au->page);
-	dma_sync_single_range_for_cpu(rq->pdev, addr, wi->offset,
-				      rq->buff.frame0_sz, rq->buff.map_dir);
+	dma_sync_single_range_for_cpu(rq->pdev, di->addr, wi->offset,
+				      rq->buff.frame0_sz, DMA_FROM_DEVICE);
 	net_prefetchw(va); /* xdp_frame data area */
 	net_prefetch(va + rx_headroom);
 
@@ -1603,13 +1599,12 @@ mlx5e_skb_from_cqe_nonlinear(struct mlx5e_rq *rq, struct mlx5e_wqe_frag_info *wi
 	while (cqe_bcnt) {
 		skb_frag_t *frag;
 
-		au = wi->au;
+		di = wi->di;
 
 		frag_consumed_bytes = min_t(u32, frag_info->frag_size, cqe_bcnt);
 
-		addr = page_pool_get_dma_addr(au->page);
-		dma_sync_single_for_cpu(rq->pdev, addr + wi->offset,
-					frag_consumed_bytes, rq->buff.map_dir);
+		dma_sync_single_for_cpu(rq->pdev, di->addr + wi->offset,
+					frag_consumed_bytes, DMA_FROM_DEVICE);
 
 		if (!xdp_buff_has_frags(&xdp)) {
 			/* Init on the first fragment to avoid cold cache access
@@ -1621,11 +1616,11 @@ mlx5e_skb_from_cqe_nonlinear(struct mlx5e_rq *rq, struct mlx5e_wqe_frag_info *wi
 		}
 
 		frag = &sinfo->frags[sinfo->nr_frags++];
-		__skb_frag_set_page(frag, au->page);
+		__skb_frag_set_page(frag, di->page);
 		skb_frag_off_set(frag, wi->offset);
 		skb_frag_size_set(frag, frag_consumed_bytes);
 
-		if (page_is_pfmemalloc(au->page))
+		if (page_is_pfmemalloc(di->page))
 			xdp_buff_set_frag_pfmemalloc(&xdp);
 
 		sinfo->xdp_frags_size += frag_consumed_bytes;
@@ -1636,10 +1631,10 @@ mlx5e_skb_from_cqe_nonlinear(struct mlx5e_rq *rq, struct mlx5e_wqe_frag_info *wi
 		wi++;
 	}
 
-	au = head_wi->au;
+	di = head_wi->di;
 
 	prog = rcu_dereference(rq->xdp_prog);
-	if (prog && mlx5e_xdp_handle(rq, au->page, prog, &xdp)) {
+	if (prog && mlx5e_xdp_handle(rq, di->page, prog, &xdp)) {
 		if (test_bit(MLX5E_RQ_FLAG_XDP_XMIT, rq->flags)) {
 			int i;
 
@@ -1656,7 +1651,7 @@ mlx5e_skb_from_cqe_nonlinear(struct mlx5e_rq *rq, struct mlx5e_wqe_frag_info *wi
 	if (unlikely(!skb))
 		return NULL;
 
-	page_ref_inc(au->page);
+	page_ref_inc(di->page);
 
 	if (unlikely(xdp_buff_has_frags(&xdp))) {
 		int i;
@@ -1711,10 +1706,9 @@ static void mlx5e_handle_rx_cqe(struct mlx5e_rq *rq, struct mlx5_cqe64 *cqe)
 		goto free_wqe;
 	}
 
-	skb = INDIRECT_CALL_3(rq->wqe.skb_from_cqe,
+	skb = INDIRECT_CALL_2(rq->wqe.skb_from_cqe,
 			      mlx5e_skb_from_cqe_linear,
 			      mlx5e_skb_from_cqe_nonlinear,
-			      mlx5e_xsk_skb_from_cqe_linear,
 			      rq, wi, cqe_bcnt);
 	if (!skb) {
 		/* probably for XDP */
@@ -1797,11 +1791,11 @@ static void mlx5e_handle_rx_cqe_mpwrq_rep(struct mlx5e_rq *rq, struct mlx5_cqe64
 {
 	u16 cstrides       = mpwrq_get_cqe_consumed_strides(cqe);
 	u16 wqe_id         = be16_to_cpu(cqe->wqe_id);
-	struct mlx5e_mpw_info *wi = mlx5e_get_mpw_info(rq, wqe_id);
+	struct mlx5e_mpw_info *wi = &rq->mpwqe.info[wqe_id];
 	u16 stride_ix      = mpwrq_get_cqe_stride_index(cqe);
 	u32 wqe_offset     = stride_ix << rq->mpwqe.log_stride_sz;
-	u32 head_offset    = wqe_offset & ((1 << rq->mpwqe.page_shift) - 1);
-	u32 page_idx       = wqe_offset >> rq->mpwqe.page_shift;
+	u32 head_offset    = wqe_offset & (PAGE_SIZE - 1);
+	u32 page_idx       = wqe_offset >> PAGE_SHIFT;
 	struct mlx5e_rx_wqe_ll *wqe;
 	struct mlx5_wq_ll *wq;
 	struct sk_buff *skb;
@@ -1852,13 +1846,12 @@ const struct mlx5e_rx_handlers mlx5e_rx_handlers_rep = {
 #endif
 
 static void
-mlx5e_fill_skb_data(struct sk_buff *skb, struct mlx5e_rq *rq,
-		    union mlx5e_alloc_unit *au, u32 data_bcnt, u32 data_offset)
+mlx5e_fill_skb_data(struct sk_buff *skb, struct mlx5e_rq *rq, struct mlx5e_dma_info *di,
+		    u32 data_bcnt, u32 data_offset)
 {
 	net_prefetchw(skb->data);
 
 	while (data_bcnt) {
-		/* Non-linear mode, hence non-XSK, which always uses PAGE_SIZE. */
 		u32 pg_consumed_bytes = min_t(u32, PAGE_SIZE - data_offset, data_bcnt);
 		unsigned int truesize;
 
@@ -1867,12 +1860,12 @@ mlx5e_fill_skb_data(struct sk_buff *skb, struct mlx5e_rq *rq,
 		else
 			truesize = ALIGN(pg_consumed_bytes, BIT(rq->mpwqe.log_stride_sz));
 
-		mlx5e_add_skb_frag(rq, skb, au, data_offset,
+		mlx5e_add_skb_frag(rq, skb, di, data_offset,
 				   pg_consumed_bytes, truesize);
 
 		data_bcnt -= pg_consumed_bytes;
 		data_offset = 0;
-		au++;
+		di++;
 	}
 }
 
@@ -1880,13 +1873,12 @@ static struct sk_buff *
 mlx5e_skb_from_cqe_mpwrq_nonlinear(struct mlx5e_rq *rq, struct mlx5e_mpw_info *wi,
 				   u16 cqe_bcnt, u32 head_offset, u32 page_idx)
 {
-	union mlx5e_alloc_unit *au = &wi->alloc_units[page_idx];
 	u16 headlen = min_t(u16, MLX5E_RX_MAX_HEAD, cqe_bcnt);
+	struct mlx5e_dma_info *di = &wi->umr.dma_info[page_idx];
 	u32 frag_offset    = head_offset + headlen;
 	u32 byte_cnt       = cqe_bcnt - headlen;
-	union mlx5e_alloc_unit *head_au = au;
+	struct mlx5e_dma_info *head_di = di;
 	struct sk_buff *skb;
-	dma_addr_t addr;
 
 	skb = napi_alloc_skb(rq->cq.napi,
 			     ALIGN(MLX5E_RX_MAX_HEAD, sizeof(long)));
@@ -1897,17 +1889,14 @@ mlx5e_skb_from_cqe_mpwrq_nonlinear(struct mlx5e_rq *rq, struct mlx5e_mpw_info *w
 
 	net_prefetchw(skb->data);
 
-	/* Non-linear mode, hence non-XSK, which always uses PAGE_SIZE. */
 	if (unlikely(frag_offset >= PAGE_SIZE)) {
-		au++;
+		di++;
 		frag_offset -= PAGE_SIZE;
 	}
 
-	mlx5e_fill_skb_data(skb, rq, au, byte_cnt, frag_offset);
+	mlx5e_fill_skb_data(skb, rq, di, byte_cnt, frag_offset);
 	/* copy header */
-	addr = page_pool_get_dma_addr(head_au->page);
-	mlx5e_copy_skb_header(rq, skb, head_au->page, addr,
-			      head_offset, head_offset, headlen);
+	mlx5e_copy_skb_header(rq->pdev, skb, head_di, head_offset, head_offset, headlen);
 	/* skb linear part was allocated with headlen and aligned to long */
 	skb->tail += headlen;
 	skb->len  += headlen;
@@ -1919,13 +1908,12 @@ static struct sk_buff *
 mlx5e_skb_from_cqe_mpwrq_linear(struct mlx5e_rq *rq, struct mlx5e_mpw_info *wi,
 				u16 cqe_bcnt, u32 head_offset, u32 page_idx)
 {
-	union mlx5e_alloc_unit *au = &wi->alloc_units[page_idx];
+	struct mlx5e_dma_info *di = &wi->umr.dma_info[page_idx];
 	u16 rx_headroom = rq->buff.headroom;
 	struct bpf_prog *prog;
 	struct sk_buff *skb;
 	u32 metasize = 0;
 	void *va, *data;
-	dma_addr_t addr;
 	u32 frag_size;
 
 	/* Check packet size. Note LRO doesn't use linear SKB */
@@ -1934,13 +1922,12 @@ mlx5e_skb_from_cqe_mpwrq_linear(struct mlx5e_rq *rq, struct mlx5e_mpw_info *wi,
 		return NULL;
 	}
 
-	va             = page_address(au->page) + head_offset;
+	va             = page_address(di->page) + head_offset;
 	data           = va + rx_headroom;
 	frag_size      = MLX5_SKB_FRAG_SZ(rx_headroom + cqe_bcnt);
 
-	addr = page_pool_get_dma_addr(au->page);
-	dma_sync_single_range_for_cpu(rq->pdev, addr, head_offset,
-				      frag_size, rq->buff.map_dir);
+	dma_sync_single_range_for_cpu(rq->pdev, di->addr, head_offset,
+				      frag_size, DMA_FROM_DEVICE);
 	net_prefetch(data);
 
 	prog = rcu_dereference(rq->xdp_prog);
@@ -1949,7 +1936,7 @@ mlx5e_skb_from_cqe_mpwrq_linear(struct mlx5e_rq *rq, struct mlx5e_mpw_info *wi,
 
 		net_prefetchw(va); /* xdp_frame data area */
 		mlx5e_fill_xdp_buff(rq, va, rx_headroom, cqe_bcnt, &xdp);
-		if (mlx5e_xdp_handle(rq, au->page, prog, &xdp)) {
+		if (mlx5e_xdp_handle(rq, di->page, prog, &xdp)) {
 			if (__test_and_clear_bit(MLX5E_RQ_FLAG_XDP_XMIT, rq->flags))
 				__set_bit(page_idx, wi->xdp_xmit_bitmap); /* non-atomic */
 			return NULL; /* page/packet was consumed by XDP */
@@ -1965,7 +1952,7 @@ mlx5e_skb_from_cqe_mpwrq_linear(struct mlx5e_rq *rq, struct mlx5e_mpw_info *wi,
 		return NULL;
 
 	/* queue up for recycling/reuse */
-	page_ref_inc(au->page);
+	page_ref_inc(di->page);
 
 	return skb;
 }
@@ -1988,7 +1975,7 @@ mlx5e_skb_from_cqe_shampo(struct mlx5e_rq *rq, struct mlx5e_mpw_info *wi,
 
 	if (likely(frag_size <= BIT(MLX5E_SHAMPO_LOG_MAX_HEADER_ENTRY_SIZE))) {
 		/* build SKB around header */
-		dma_sync_single_range_for_cpu(rq->pdev, head->addr, 0, frag_size, rq->buff.map_dir);
+		dma_sync_single_range_for_cpu(rq->pdev, head->addr, 0, frag_size, DMA_FROM_DEVICE);
 		prefetchw(hdr);
 		prefetch(data);
 		skb = mlx5e_build_linear_skb(rq, hdr, frag_size, rx_headroom, head_size, 0);
@@ -2010,7 +1997,7 @@ mlx5e_skb_from_cqe_shampo(struct mlx5e_rq *rq, struct mlx5e_mpw_info *wi,
 		}
 
 		prefetchw(skb->data);
-		mlx5e_copy_skb_header(rq, skb, head->page, head->addr,
+		mlx5e_copy_skb_header(rq->pdev, skb, head,
 				      head_offset + rx_headroom,
 				      rx_headroom, head_size);
 		/* skb linear part was allocated with headlen and aligned to long */
@@ -2062,7 +2049,7 @@ mlx5e_free_rx_shampo_hd_entry(struct mlx5e_rq *rq, u16 header_index)
 
 	if (((header_index + 1) & (MLX5E_SHAMPO_WQ_HEADER_PER_PAGE - 1)) == 0) {
 		shampo->info[header_index].addr = ALIGN_DOWN(addr, PAGE_SIZE);
-		mlx5e_page_release_dynamic(rq, shampo->info[header_index].page, true);
+		mlx5e_page_release(rq, &shampo->info[header_index], true);
 	}
 	bitmap_clear(shampo->bitmap, header_index, 1);
 }
@@ -2083,11 +2070,11 @@ static void mlx5e_handle_rx_cqe_mpwrq_shampo(struct mlx5e_rq *rq, struct mlx5_cq
 	bool match		= cqe->shampo.match;
 	struct mlx5e_rq_stats *stats = rq->stats;
 	struct mlx5e_rx_wqe_ll *wqe;
-	union mlx5e_alloc_unit *au;
+	struct mlx5e_dma_info *di;
 	struct mlx5e_mpw_info *wi;
 	struct mlx5_wq_ll *wq;
 
-	wi = mlx5e_get_mpw_info(rq, wqe_id);
+	wi = &rq->mpwqe.info[wqe_id];
 	wi->consumed_strides += cstrides;
 
 	if (unlikely(MLX5E_RX_ERR_CQE(cqe))) {
@@ -2133,8 +2120,8 @@ static void mlx5e_handle_rx_cqe_mpwrq_shampo(struct mlx5e_rq *rq, struct mlx5_cq
 	}
 
 	if (likely(head_size)) {
-		au = &wi->alloc_units[page_idx];
-		mlx5e_fill_skb_data(*skb, rq, au, data_bcnt, data_offset);
+		di = &wi->umr.dma_info[page_idx];
+		mlx5e_fill_skb_data(*skb, rq, di, data_bcnt, data_offset);
 	}
 
 	mlx5e_shampo_complete_rx_cqe(rq, cqe, cqe_bcnt, *skb);
@@ -2156,11 +2143,11 @@ static void mlx5e_handle_rx_cqe_mpwrq(struct mlx5e_rq *rq, struct mlx5_cqe64 *cq
 {
 	u16 cstrides       = mpwrq_get_cqe_consumed_strides(cqe);
 	u16 wqe_id         = be16_to_cpu(cqe->wqe_id);
-	struct mlx5e_mpw_info *wi = mlx5e_get_mpw_info(rq, wqe_id);
+	struct mlx5e_mpw_info *wi = &rq->mpwqe.info[wqe_id];
 	u16 stride_ix      = mpwrq_get_cqe_stride_index(cqe);
 	u32 wqe_offset     = stride_ix << rq->mpwqe.log_stride_sz;
-	u32 head_offset    = wqe_offset & ((1 << rq->mpwqe.page_shift) - 1);
-	u32 page_idx       = wqe_offset >> rq->mpwqe.page_shift;
+	u32 head_offset    = wqe_offset & (PAGE_SIZE - 1);
+	u32 page_idx       = wqe_offset >> PAGE_SHIFT;
 	struct mlx5e_rx_wqe_ll *wqe;
 	struct mlx5_wq_ll *wq;
 	struct sk_buff *skb;
@@ -2183,10 +2170,9 @@ static void mlx5e_handle_rx_cqe_mpwrq(struct mlx5e_rq *rq, struct mlx5_cqe64 *cq
 
 	cqe_bcnt = mpwrq_get_cqe_byte_cnt(cqe);
 
-	skb = INDIRECT_CALL_3(rq->mpwqe.skb_from_cqe_mpwrq,
+	skb = INDIRECT_CALL_2(rq->mpwqe.skb_from_cqe_mpwrq,
 			      mlx5e_skb_from_cqe_mpwrq_linear,
 			      mlx5e_skb_from_cqe_mpwrq_nonlinear,
-			      mlx5e_xsk_skb_from_cqe_mpwrq_linear,
 			      rq, wi, cqe_bcnt, head_offset, page_idx);
 	if (!skb)
 		goto mpwrq_cqe_out;
@@ -2300,7 +2286,7 @@ static inline void mlx5i_complete_rx_cqe(struct mlx5e_rq *rq,
 
 	priv = mlx5i_epriv(netdev);
 	tstamp = &priv->tstamp;
-	stats = &priv->channel_stats[rq->ix]->rq;
+	stats = rq->stats;
 
 	flags_rqpn = be32_to_cpu(cqe->flags_rqpn);
 	g = (flags_rqpn >> 28) & 3;
@@ -2431,7 +2417,7 @@ int mlx5e_rq_set_handlers(struct mlx5e_rq *rq, struct mlx5e_params *params, bool
 	default: /* MLX5_WQ_TYPE_CYCLIC */
 		rq->wqe.skb_from_cqe = xsk ?
 			mlx5e_xsk_skb_from_cqe_linear :
-			mlx5e_rx_is_linear_skb(mdev, params, NULL) ?
+			mlx5e_rx_is_linear_skb(params, NULL) ?
 				mlx5e_skb_from_cqe_linear :
 				mlx5e_skb_from_cqe_nonlinear;
 		rq->post_wqes = mlx5e_post_rx_wqes;
@@ -2485,7 +2471,7 @@ free_wqe:
 
 void mlx5e_rq_set_trap_handlers(struct mlx5e_rq *rq, struct mlx5e_params *params)
 {
-	rq->wqe.skb_from_cqe = mlx5e_rx_is_linear_skb(rq->mdev, params, NULL) ?
+	rq->wqe.skb_from_cqe = mlx5e_rx_is_linear_skb(params, NULL) ?
 			       mlx5e_skb_from_cqe_linear :
 			       mlx5e_skb_from_cqe_nonlinear;
 	rq->post_wqes = mlx5e_post_rx_wqes;

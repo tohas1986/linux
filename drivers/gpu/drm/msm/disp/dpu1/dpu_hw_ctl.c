@@ -150,84 +150,92 @@ static inline void dpu_hw_ctl_trigger_flush(struct dpu_hw_ctl *ctx)
 	DPU_REG_WRITE(&ctx->hw, CTL_FLUSH, ctx->pending_flush_mask);
 }
 
-static void dpu_hw_ctl_update_pending_flush_sspp(struct dpu_hw_ctl *ctx,
+static uint32_t dpu_hw_ctl_get_bitmask_sspp(struct dpu_hw_ctl *ctx,
 	enum dpu_sspp sspp)
 {
+	uint32_t flushbits = 0;
+
 	switch (sspp) {
 	case SSPP_VIG0:
-		ctx->pending_flush_mask |=  BIT(0);
+		flushbits =  BIT(0);
 		break;
 	case SSPP_VIG1:
-		ctx->pending_flush_mask |= BIT(1);
+		flushbits = BIT(1);
 		break;
 	case SSPP_VIG2:
-		ctx->pending_flush_mask |= BIT(2);
+		flushbits = BIT(2);
 		break;
 	case SSPP_VIG3:
-		ctx->pending_flush_mask |= BIT(18);
+		flushbits = BIT(18);
 		break;
 	case SSPP_RGB0:
-		ctx->pending_flush_mask |= BIT(3);
+		flushbits = BIT(3);
 		break;
 	case SSPP_RGB1:
-		ctx->pending_flush_mask |= BIT(4);
+		flushbits = BIT(4);
 		break;
 	case SSPP_RGB2:
-		ctx->pending_flush_mask |= BIT(5);
+		flushbits = BIT(5);
 		break;
 	case SSPP_RGB3:
-		ctx->pending_flush_mask |= BIT(19);
+		flushbits = BIT(19);
 		break;
 	case SSPP_DMA0:
-		ctx->pending_flush_mask |= BIT(11);
+		flushbits = BIT(11);
 		break;
 	case SSPP_DMA1:
-		ctx->pending_flush_mask |= BIT(12);
+		flushbits = BIT(12);
 		break;
 	case SSPP_DMA2:
-		ctx->pending_flush_mask |= BIT(24);
+		flushbits = BIT(24);
 		break;
 	case SSPP_DMA3:
-		ctx->pending_flush_mask |= BIT(25);
+		flushbits = BIT(25);
 		break;
 	case SSPP_CURSOR0:
-		ctx->pending_flush_mask |= BIT(22);
+		flushbits = BIT(22);
 		break;
 	case SSPP_CURSOR1:
-		ctx->pending_flush_mask |= BIT(23);
+		flushbits = BIT(23);
 		break;
 	default:
 		break;
 	}
+
+	return flushbits;
 }
 
-static void dpu_hw_ctl_update_pending_flush_mixer(struct dpu_hw_ctl *ctx,
+static uint32_t dpu_hw_ctl_get_bitmask_mixer(struct dpu_hw_ctl *ctx,
 	enum dpu_lm lm)
 {
+	uint32_t flushbits = 0;
+
 	switch (lm) {
 	case LM_0:
-		ctx->pending_flush_mask |= BIT(6);
+		flushbits = BIT(6);
 		break;
 	case LM_1:
-		ctx->pending_flush_mask |= BIT(7);
+		flushbits = BIT(7);
 		break;
 	case LM_2:
-		ctx->pending_flush_mask |= BIT(8);
+		flushbits = BIT(8);
 		break;
 	case LM_3:
-		ctx->pending_flush_mask |= BIT(9);
+		flushbits = BIT(9);
 		break;
 	case LM_4:
-		ctx->pending_flush_mask |= BIT(10);
+		flushbits = BIT(10);
 		break;
 	case LM_5:
-		ctx->pending_flush_mask |= BIT(20);
+		flushbits = BIT(20);
 		break;
 	default:
-		break;
+		return -EINVAL;
 	}
 
-	ctx->pending_flush_mask |= CTL_FLUSH_MASK_CTL;
+	flushbits |= CTL_FLUSH_MASK_CTL;
+
+	return flushbits;
 }
 
 static void dpu_hw_ctl_update_pending_flush_intf(struct dpu_hw_ctl *ctx,
@@ -286,25 +294,29 @@ static void dpu_hw_ctl_update_pending_flush_merge_3d_v1(struct dpu_hw_ctl *ctx,
 	ctx->pending_flush_mask |= BIT(MERGE_3D_IDX);
 }
 
-static void dpu_hw_ctl_update_pending_flush_dspp(struct dpu_hw_ctl *ctx,
+static uint32_t dpu_hw_ctl_get_bitmask_dspp(struct dpu_hw_ctl *ctx,
 	enum dpu_dspp dspp)
 {
+	uint32_t flushbits = 0;
+
 	switch (dspp) {
 	case DSPP_0:
-		ctx->pending_flush_mask |= BIT(13);
+		flushbits = BIT(13);
 		break;
 	case DSPP_1:
-		ctx->pending_flush_mask |= BIT(14);
+		flushbits = BIT(14);
 		break;
 	case DSPP_2:
-		ctx->pending_flush_mask |= BIT(15);
+		flushbits = BIT(15);
 		break;
 	case DSPP_3:
-		ctx->pending_flush_mask |= BIT(21);
+		flushbits = BIT(21);
 		break;
 	default:
-		break;
+		return 0;
 	}
+
+	return flushbits;
 }
 
 static u32 dpu_hw_ctl_poll_reset_status(struct dpu_hw_ctl *ctx, u32 timeout_us)
@@ -673,9 +685,9 @@ static void _setup_ctl_ops(struct dpu_hw_ctl_ops *ops,
 	ops->wait_reset_status = dpu_hw_ctl_wait_reset_status;
 	ops->clear_all_blendstages = dpu_hw_ctl_clear_all_blendstages;
 	ops->setup_blendstage = dpu_hw_ctl_setup_blendstage;
-	ops->update_pending_flush_sspp = dpu_hw_ctl_update_pending_flush_sspp;
-	ops->update_pending_flush_mixer = dpu_hw_ctl_update_pending_flush_mixer;
-	ops->update_pending_flush_dspp = dpu_hw_ctl_update_pending_flush_dspp;
+	ops->get_bitmask_sspp = dpu_hw_ctl_get_bitmask_sspp;
+	ops->get_bitmask_mixer = dpu_hw_ctl_get_bitmask_mixer;
+	ops->get_bitmask_dspp = dpu_hw_ctl_get_bitmask_dspp;
 	if (cap & BIT(DPU_CTL_FETCH_ACTIVE))
 		ops->set_active_pipes = dpu_hw_ctl_set_fetch_pipe_active;
 };

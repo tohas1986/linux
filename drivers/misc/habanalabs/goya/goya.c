@@ -916,11 +916,26 @@ int goya_late_init(struct hl_device *hdev)
  */
 void goya_late_fini(struct hl_device *hdev)
 {
+	const struct hwmon_channel_info **channel_info_arr;
 	struct goya_device *goya = hdev->asic_specific;
+	int i = 0;
 
 	cancel_delayed_work_sync(&goya->goya_work->work_freq);
 
-	hl_hwmon_release_resources(hdev);
+	if (!hdev->hl_chip_info->info)
+		return;
+
+	channel_info_arr = hdev->hl_chip_info->info;
+
+	while (channel_info_arr[i]) {
+		kfree(channel_info_arr[i]->config);
+		kfree(channel_info_arr[i]);
+		i++;
+	}
+
+	kfree(channel_info_arr);
+
+	hdev->hl_chip_info->info = NULL;
 }
 
 static void goya_set_pci_memory_regions(struct hl_device *hdev)
@@ -1025,7 +1040,6 @@ static int goya_sw_init(struct hl_device *hdev)
 	hdev->asic_prop.supports_compute_reset = true;
 	hdev->asic_prop.allow_inference_soft_reset = true;
 	hdev->supports_wait_for_multi_cs = false;
-	hdev->supports_ctx_switch = true;
 
 	hdev->asic_funcs->set_pci_memory_regions(hdev);
 
@@ -4545,7 +4559,7 @@ static int goya_unmask_irq_arr(struct hl_device *hdev, u32 *irq_arr,
 	return rc;
 }
 
-static int goya_compute_reset_late_init(struct hl_device *hdev)
+static int goya_non_hard_reset_late_init(struct hl_device *hdev)
 {
 	/*
 	 * Unmask all IRQs since some could have been received
@@ -5123,8 +5137,8 @@ int goya_cpucp_info_get(struct hl_device *hdev)
 	return 0;
 }
 
-static bool goya_is_device_idle(struct hl_device *hdev, u64 *mask_arr, u8 mask_len,
-				struct engines_data *e)
+static bool goya_is_device_idle(struct hl_device *hdev, u64 *mask_arr,
+					u8 mask_len, struct seq_file *s)
 {
 	const char *fmt = "%-5d%-9s%#-14x%#-16x%#x\n";
 	const char *dma_fmt = "%-5d%-9s%#-14x%#x\n";
@@ -5135,9 +5149,9 @@ static bool goya_is_device_idle(struct hl_device *hdev, u64 *mask_arr, u8 mask_l
 	u64 offset;
 	int i;
 
-	if (e)
-		hl_engine_data_sprintf(e, "\nDMA  is_idle  QM_GLBL_STS0  DMA_CORE_STS0\n"
-					"---  -------  ------------  -------------\n");
+	if (s)
+		seq_puts(s, "\nDMA  is_idle  QM_GLBL_STS0  DMA_CORE_STS0\n"
+				"---  -------  ------------  -------------\n");
 
 	offset = mmDMA_QM_1_GLBL_STS0 - mmDMA_QM_0_GLBL_STS0;
 
@@ -5150,13 +5164,13 @@ static bool goya_is_device_idle(struct hl_device *hdev, u64 *mask_arr, u8 mask_l
 
 		if (mask && !is_eng_idle)
 			set_bit(GOYA_ENGINE_ID_DMA_0 + i, mask);
-		if (e)
-			hl_engine_data_sprintf(e, dma_fmt, i, is_eng_idle ? "Y" : "N",
+		if (s)
+			seq_printf(s, dma_fmt, i, is_eng_idle ? "Y" : "N",
 					qm_glbl_sts0, dma_core_sts0);
 	}
 
-	if (e)
-		hl_engine_data_sprintf(e,
+	if (s)
+		seq_puts(s,
 			"\nTPC  is_idle  QM_GLBL_STS0  CMDQ_GLBL_STS0  CFG_STATUS\n"
 			"---  -------  ------------  --------------  ----------\n");
 
@@ -5173,13 +5187,13 @@ static bool goya_is_device_idle(struct hl_device *hdev, u64 *mask_arr, u8 mask_l
 
 		if (mask && !is_eng_idle)
 			set_bit(GOYA_ENGINE_ID_TPC_0 + i, mask);
-		if (e)
-			hl_engine_data_sprintf(e, fmt, i, is_eng_idle ? "Y" : "N",
+		if (s)
+			seq_printf(s, fmt, i, is_eng_idle ? "Y" : "N",
 				qm_glbl_sts0, cmdq_glbl_sts0, tpc_cfg_sts);
 	}
 
-	if (e)
-		hl_engine_data_sprintf(e,
+	if (s)
+		seq_puts(s,
 			"\nMME  is_idle  QM_GLBL_STS0  CMDQ_GLBL_STS0  ARCH_STATUS\n"
 			"---  -------  ------------  --------------  -----------\n");
 
@@ -5193,10 +5207,10 @@ static bool goya_is_device_idle(struct hl_device *hdev, u64 *mask_arr, u8 mask_l
 
 	if (mask && !is_eng_idle)
 		set_bit(GOYA_ENGINE_ID_MME_0, mask);
-	if (e) {
-		hl_engine_data_sprintf(e, fmt, 0, is_eng_idle ? "Y" : "N", qm_glbl_sts0,
+	if (s) {
+		seq_printf(s, fmt, 0, is_eng_idle ? "Y" : "N", qm_glbl_sts0,
 				cmdq_glbl_sts0, mme_arch_sts);
-		hl_engine_data_sprintf(e, "\n");
+		seq_puts(s, "\n");
 	}
 
 	return is_idle;
@@ -5420,11 +5434,6 @@ static int goya_scrub_device_dram(struct hl_device *hdev, u64 val)
 	return -EOPNOTSUPP;
 }
 
-static int goya_send_device_activity(struct hl_device *hdev, bool open)
-{
-	return 0;
-}
-
 static const struct hl_asic_funcs goya_funcs = {
 	.early_init = goya_early_init,
 	.early_fini = goya_early_fini,
@@ -5469,9 +5478,11 @@ static const struct hl_asic_funcs goya_funcs = {
 	.send_heartbeat = goya_send_heartbeat,
 	.debug_coresight = goya_debug_coresight,
 	.is_device_idle = goya_is_device_idle,
-	.compute_reset_late_init = goya_compute_reset_late_init,
+	.non_hard_reset_late_init = goya_non_hard_reset_late_init,
 	.hw_queues_lock = goya_hw_queues_lock,
 	.hw_queues_unlock = goya_hw_queues_unlock,
+	.kdma_lock = NULL,
+	.kdma_unlock = NULL,
 	.get_pci_id = goya_get_pci_id,
 	.get_eeprom_data = goya_get_eeprom_data,
 	.get_monitor_dump = goya_get_monitor_dump,
@@ -5517,7 +5528,6 @@ static const struct hl_asic_funcs goya_funcs = {
 	.mmu_get_real_page_size = hl_mmu_get_real_page_size,
 	.access_dev_mem = hl_access_dev_mem,
 	.set_dram_bar_base = goya_set_ddr_bar_base,
-	.send_device_activity = goya_send_device_activity,
 };
 
 /*

@@ -917,10 +917,14 @@ EXPORT_SYMBOL(ec_read);
 
 int ec_write(u8 addr, u8 val)
 {
+	int err;
+
 	if (!first_ec)
 		return -ENODEV;
 
-	return acpi_ec_write(first_ec, addr, val);
+	err = acpi_ec_write(first_ec, addr, val);
+
+	return err;
 }
 EXPORT_SYMBOL(ec_write);
 
@@ -1873,16 +1877,6 @@ static const struct dmi_system_id ec_dmi_table[] __initconst = {
 		.matches = {
 			DMI_MATCH(DMI_SYS_VENDOR, "HP"),
 			DMI_MATCH(DMI_PRODUCT_NAME, "HP Pavilion Gaming Laptop 15-cx0xxx"),
-		},
-	},
-	{
-		/*
-		 * HP Pavilion Gaming Laptop 15-cx0041ur
-		 */
-		.callback = ec_honor_dsdt_gpe,
-		.matches = {
-			DMI_MATCH(DMI_SYS_VENDOR, "HP"),
-			DMI_MATCH(DMI_PRODUCT_NAME, "HP 15-cx0041ur"),
 		},
 	},
 	{

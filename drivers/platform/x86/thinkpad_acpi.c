@@ -4497,14 +4497,6 @@ static const struct dmi_system_id fwbug_list[] __initconst = {
 			DMI_MATCH(DMI_PRODUCT_NAME, "21A0"),
 		}
 	},
-	{
-		.ident = "P14s Gen2 AMD",
-		.driver_data = &quirk_s2idle_bug,
-		.matches = {
-			DMI_MATCH(DMI_BOARD_VENDOR, "LENOVO"),
-			DMI_MATCH(DMI_PRODUCT_NAME, "21A1"),
-		}
-	},
 	{}
 };
 
@@ -5566,13 +5558,12 @@ static int light_sysfs_set(struct led_classdev *led_cdev,
 
 static enum led_brightness light_sysfs_get(struct led_classdev *led_cdev)
 {
-	return (light_get_status() == 1) ? LED_ON : LED_OFF;
+	return (light_get_status() == 1) ? LED_FULL : LED_OFF;
 }
 
 static struct tpacpi_led_classdev tpacpi_led_thinklight = {
 	.led_classdev = {
 		.name		= "tpacpi::thinklight",
-		.max_brightness	= 1,
 		.brightness_set_blocking = &light_sysfs_set,
 		.brightness_get	= &light_sysfs_get,
 	}
@@ -7634,9 +7625,9 @@ static int __init volume_create_alsa_mixer(void)
 	data = card->private_data;
 	data->card = card;
 
-	strscpy(card->driver, TPACPI_ALSA_DRVNAME,
+	strlcpy(card->driver, TPACPI_ALSA_DRVNAME,
 		sizeof(card->driver));
-	strscpy(card->shortname, TPACPI_ALSA_SHRTNAME,
+	strlcpy(card->shortname, TPACPI_ALSA_SHRTNAME,
 		sizeof(card->shortname));
 	snprintf(card->mixername, sizeof(card->mixername), "ThinkPad EC %s",
 		 (thinkpad_id.ec_version_str) ?
@@ -10315,11 +10306,9 @@ static DEFINE_MUTEX(dytc_mutex);
 static int dytc_capabilities;
 static bool dytc_mmc_get_available;
 
-static int convert_dytc_to_profile(int funcmode, int dytcmode,
-		enum platform_profile_option *profile)
+static int convert_dytc_to_profile(int dytcmode, enum platform_profile_option *profile)
 {
-	switch (funcmode) {
-	case DYTC_FUNCTION_MMC:
+	if (dytc_capabilities & BIT(DYTC_FC_MMC)) {
 		switch (dytcmode) {
 		case DYTC_MODE_MMC_LOWPOWER:
 			*profile = PLATFORM_PROFILE_LOW_POWER;
@@ -10335,7 +10324,8 @@ static int convert_dytc_to_profile(int funcmode, int dytcmode,
 			return -EINVAL;
 		}
 		return 0;
-	case DYTC_FUNCTION_PSC:
+	}
+	if (dytc_capabilities & BIT(DYTC_FC_PSC)) {
 		switch (dytcmode) {
 		case DYTC_MODE_PSC_LOWPOWER:
 			*profile = PLATFORM_PROFILE_LOW_POWER;
@@ -10349,14 +10339,6 @@ static int convert_dytc_to_profile(int funcmode, int dytcmode,
 		default: /* Unknown mode */
 			return -EINVAL;
 		}
-		return 0;
-	case DYTC_FUNCTION_AMT:
-		/* For now return balanced. It's the closest we have to 'auto' */
-		*profile =  PLATFORM_PROFILE_BALANCED;
-		return 0;
-	default:
-		/* Unknown function */
-		return -EOPNOTSUPP;
 	}
 	return 0;
 }
@@ -10500,11 +10482,11 @@ static int dytc_profile_set(struct platform_profile_handler *pprof,
 			if (err)
 				goto unlock;
 		}
-	} else if (dytc_capabilities & BIT(DYTC_FC_PSC)) {
+	}
+	if (dytc_capabilities & BIT(DYTC_FC_PSC)) {
 		err = dytc_command(DYTC_SET_COMMAND(DYTC_FUNCTION_PSC, perfmode, 1), &output);
 		if (err)
 			goto unlock;
-
 		/* system supports AMT, activate it when on balanced */
 		if (dytc_capabilities & BIT(DYTC_FC_AMT))
 			dytc_control_amt(profile == PLATFORM_PROFILE_BALANCED);
@@ -10520,7 +10502,7 @@ static void dytc_profile_refresh(void)
 {
 	enum platform_profile_option profile;
 	int output, err = 0;
-	int perfmode, funcmode;
+	int perfmode;
 
 	mutex_lock(&dytc_mutex);
 	if (dytc_capabilities & BIT(DYTC_FC_MMC)) {
@@ -10528,18 +10510,15 @@ static void dytc_profile_refresh(void)
 			err = dytc_command(DYTC_CMD_MMC_GET, &output);
 		else
 			err = dytc_cql_command(DYTC_CMD_GET, &output);
-		funcmode = DYTC_FUNCTION_MMC;
-	} else if (dytc_capabilities & BIT(DYTC_FC_PSC)) {
+	} else if (dytc_capabilities & BIT(DYTC_FC_PSC))
 		err = dytc_command(DYTC_CMD_GET, &output);
-		/* Check if we are PSC mode, or have AMT enabled */
-		funcmode = (output >> DYTC_GET_FUNCTION_BIT) & 0xF;
-	}
+
 	mutex_unlock(&dytc_mutex);
 	if (err)
 		return;
 
 	perfmode = (output >> DYTC_GET_MODE_BIT) & 0xF;
-	convert_dytc_to_profile(funcmode, perfmode, &profile);
+	convert_dytc_to_profile(perfmode, &profile);
 	if (profile != dytc_current_profile) {
 		dytc_current_profile = profile;
 		platform_profile_notify();
@@ -11738,7 +11717,7 @@ static int __init thinkpad_acpi_module_init(void)
 		tp_features.quirks = dmi_id->driver_data;
 
 	/* Device initialization */
-	tpacpi_pdev = platform_device_register_simple(TPACPI_DRVR_NAME, PLATFORM_DEVID_NONE,
+	tpacpi_pdev = platform_device_register_simple(TPACPI_DRVR_NAME, -1,
 							NULL, 0);
 	if (IS_ERR(tpacpi_pdev)) {
 		ret = PTR_ERR(tpacpi_pdev);
@@ -11749,7 +11728,7 @@ static int __init thinkpad_acpi_module_init(void)
 	}
 	tpacpi_sensors_pdev = platform_device_register_simple(
 						TPACPI_HWMON_DRVR_NAME,
-						PLATFORM_DEVID_NONE, NULL, 0);
+						-1, NULL, 0);
 	if (IS_ERR(tpacpi_sensors_pdev)) {
 		ret = PTR_ERR(tpacpi_sensors_pdev);
 		tpacpi_sensors_pdev = NULL;

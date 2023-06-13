@@ -151,13 +151,15 @@ static int mc3230_probe(struct i2c_client *client,
 	return ret;
 }
 
-static void mc3230_remove(struct i2c_client *client)
+static int mc3230_remove(struct i2c_client *client)
 {
 	struct iio_dev *indio_dev = i2c_get_clientdata(client);
 
 	iio_device_unregister(indio_dev);
 
 	mc3230_set_opcon(iio_priv(indio_dev), MC3230_MODE_OPCON_STANDBY);
+
+	return 0;
 }
 
 static int mc3230_suspend(struct device *dev)

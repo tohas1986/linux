@@ -313,7 +313,10 @@ static int mall_reoffload(struct tcf_proto *tp, bool add, flow_setup_cb_t *cb,
 	tc_cleanup_offload_action(&cls_mall.rule->action);
 	kfree(cls_mall.rule);
 
-	return err;
+	if (err)
+		return err;
+
+	return 0;
 }
 
 static void mall_stats_hw_filter(struct tcf_proto *tp,
@@ -394,7 +397,12 @@ static void mall_bind_class(void *fh, u32 classid, unsigned long cl, void *q,
 {
 	struct cls_mall_head *head = fh;
 
-	tc_cls_bind_class(classid, cl, q, &head->res, base);
+	if (head && head->res.classid == classid) {
+		if (cl)
+			__tcf_bind_filter(q, &head->res, base);
+		else
+			__tcf_unbind_filter(q, &head->res);
+	}
 }
 
 static struct tcf_proto_ops cls_mall_ops __read_mostly = {

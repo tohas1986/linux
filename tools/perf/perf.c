@@ -99,16 +99,10 @@ struct pager_config {
 	int val;
 };
 
-static bool same_cmd_with_prefix(const char *var, struct pager_config *c,
-				  const char *header)
-{
-	return (strstarts(var, header) && !strcmp(var + strlen(header), c->cmd));
-}
-
 static int pager_command_config(const char *var, const char *value, void *data)
 {
 	struct pager_config *c = data;
-	if (same_cmd_with_prefix(var, c, "pager."))
+	if (strstarts(var, "pager.") && !strcmp(var + 6, c->cmd))
 		c->val = perf_config_bool(var, value);
 	return 0;
 }
@@ -127,9 +121,9 @@ static int check_pager_config(const char *cmd)
 static int browser_command_config(const char *var, const char *value, void *data)
 {
 	struct pager_config *c = data;
-	if (same_cmd_with_prefix(var, c, "tui."))
+	if (strstarts(var, "tui.") && !strcmp(var + 4, c->cmd))
 		c->val = perf_config_bool(var, value);
-	if (same_cmd_with_prefix(var, c, "gtk."))
+	if (strstarts(var, "gtk.") && !strcmp(var + 4, c->cmd))
 		c->val = perf_config_bool(var, value) ? 2 : 0;
 	return 0;
 }

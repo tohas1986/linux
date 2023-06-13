@@ -779,6 +779,7 @@ static int __init chr_dev_init(void)
 			continue;
 
 #ifdef CONFIG_DEVMEM_BOOTPARAM
+		devmem = true;
 		if (minor == DEVMEM_MINOR && !devmem)
 			continue;
 #endif

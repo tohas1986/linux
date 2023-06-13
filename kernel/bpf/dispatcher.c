@@ -4,7 +4,6 @@
 #include <linux/hash.h>
 #include <linux/bpf.h>
 #include <linux/filter.h>
-#include <linux/static_call.h>
 
 /* The BPF dispatcher is a multiway branch code generator. The
  * dispatcher is a mechanism to avoid the performance penalty of an
@@ -105,11 +104,17 @@ static int bpf_dispatcher_prepare(struct bpf_dispatcher *d, void *image, void *b
 
 static void bpf_dispatcher_update(struct bpf_dispatcher *d, int prev_num_progs)
 {
-	void *new, *tmp;
-	u32 noff = 0;
+	void *old, *new, *tmp;
+	u32 noff;
+	int err;
 
-	if (prev_num_progs)
+	if (!prev_num_progs) {
+		old = NULL;
+		noff = 0;
+	} else {
+		old = d->image + d->image_off;
 		noff = d->image_off ^ (PAGE_SIZE / 2);
+	}
 
 	new = d->num_progs ? d->image + noff : NULL;
 	tmp = d->num_progs ? d->rw_image + noff : NULL;
@@ -123,10 +128,11 @@ static void bpf_dispatcher_update(struct bpf_dispatcher *d, int prev_num_progs)
 			return;
 	}
 
-	__BPF_DISPATCHER_UPDATE(d, new ?: (void *)&bpf_dispatcher_nop_func);
+	err = bpf_arch_text_poke(d->func, BPF_MOD_JUMP, old, new);
+	if (err || !new)
+		return;
 
-	if (new)
-		d->image_off = noff;
+	d->image_off = noff;
 }
 
 void bpf_dispatcher_change_prog(struct bpf_dispatcher *d, struct bpf_prog *from,

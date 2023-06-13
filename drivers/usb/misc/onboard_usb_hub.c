@@ -27,10 +27,7 @@
 
 #include "onboard_usb_hub.h"
 
-static void onboard_hub_attach_usb_driver(struct work_struct *work);
-
 static struct usb_device_driver onboard_hub_usbdev_driver;
-static DECLARE_WORK(attach_usb_driver_work, onboard_hub_attach_usb_driver);
 
 /************************** Platform driver **************************/
 
@@ -48,6 +45,7 @@ struct onboard_hub {
 	bool is_powered_on;
 	bool going_away;
 	struct list_head udev_list;
+	struct work_struct attach_usb_driver_work;
 	struct mutex lock;
 };
 
@@ -273,7 +271,8 @@ static int onboard_hub_probe(struct platform_device *pdev)
 	 * This needs to be done deferred to avoid self-deadlocks on systems
 	 * with nested onboard hubs.
 	 */
-	schedule_work(&attach_usb_driver_work);
+	INIT_WORK(&hub->attach_usb_driver_work, onboard_hub_attach_usb_driver);
+	schedule_work(&hub->attach_usb_driver_work);
 
 	return 0;
 }
@@ -285,6 +284,9 @@ static int onboard_hub_remove(struct platform_device *pdev)
 	struct usb_device *udev;
 
 	hub->going_away = true;
+
+	if (&hub->attach_usb_driver_work != current_work())
+		cancel_work_sync(&hub->attach_usb_driver_work);
 
 	mutex_lock(&hub->lock);
 
@@ -429,13 +431,13 @@ static int __init onboard_hub_init(void)
 {
 	int ret;
 
-	ret = usb_register_device_driver(&onboard_hub_usbdev_driver, THIS_MODULE);
+	ret = platform_driver_register(&onboard_hub_driver);
 	if (ret)
 		return ret;
 
-	ret = platform_driver_register(&onboard_hub_driver);
+	ret = usb_register_device_driver(&onboard_hub_usbdev_driver, THIS_MODULE);
 	if (ret)
-		usb_deregister_device_driver(&onboard_hub_usbdev_driver);
+		platform_driver_unregister(&onboard_hub_driver);
 
 	return ret;
 }
@@ -445,8 +447,6 @@ static void __exit onboard_hub_exit(void)
 {
 	usb_deregister_device_driver(&onboard_hub_usbdev_driver);
 	platform_driver_unregister(&onboard_hub_driver);
-
-	cancel_work_sync(&attach_usb_driver_work);
 }
 module_exit(onboard_hub_exit);
 

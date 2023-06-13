@@ -2,6 +2,16 @@
 // Copyright 2019 IBM Corp.
 
 &pinctrl {
+	pinctrl_pcierc0_default: pcierc0_default {
+		function = "PCIERC0";
+		groups = "PCIERC0";
+	};
+
+	pinctrl_pcierc1_default: pcierc1_default {
+		function = "PCIERC1";
+		groups = "PCIERC1";
+	};
+
 	pinctrl_adc0_default: adc0_default {
 		function = "ADC0";
 		groups = "ADC0";
@@ -295,6 +305,16 @@
 	pinctrl_i2c9_default: i2c9_default {
 		function = "I2C9";
 		groups = "I2C9";
+	};
+
+	pinctrl_i3c1_default: i3c1_default {
+		function = "I3C1";
+		groups = "I3C1";
+	};
+
+	pinctrl_i3c2_default: i3c2_default {
+		function = "I3C2";
+		groups = "I3C2";
 	};
 
 	pinctrl_i3c3_default: i3c3_default {
@@ -1140,6 +1160,16 @@
 	pinctrl_usb2bd_default: usb2bd_default {
 		function = "USB2BD";
 		groups = "USBB";
+	};
+
+	pinctrl_usb2adp_default: usb2adp_default {
+		function = "USB2ADP";
+		groups = "USBA";
+	};
+
+	pinctrl_usb2ahp_default: usb2ahp_default {
+		function = "USB2AHP";
+		groups = "USBA";
 	};
 
 	pinctrl_usb11bhid_default: usb11bhid_default {

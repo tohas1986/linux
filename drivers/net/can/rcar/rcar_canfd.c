@@ -1873,9 +1873,10 @@ static int rcar_canfd_probe(struct platform_device *pdev)
 
 	/* Global controller context */
 	gpriv = devm_kzalloc(&pdev->dev, sizeof(*gpriv), GFP_KERNEL);
-	if (!gpriv)
-		return -ENOMEM;
-
+	if (!gpriv) {
+		err = -ENOMEM;
+		goto fail_dev;
+	}
 	gpriv->pdev = pdev;
 	gpriv->channels_mask = channels_mask;
 	gpriv->fdmode = fdmode;
@@ -1896,9 +1897,12 @@ static int rcar_canfd_probe(struct platform_device *pdev)
 
 	/* Peripheral clock */
 	gpriv->clkp = devm_clk_get(&pdev->dev, "fck");
-	if (IS_ERR(gpriv->clkp))
-		return dev_err_probe(&pdev->dev, PTR_ERR(gpriv->clkp),
-				     "cannot get peripheral clock\n");
+	if (IS_ERR(gpriv->clkp)) {
+		err = PTR_ERR(gpriv->clkp);
+		dev_err(&pdev->dev, "cannot get peripheral clock, error %d\n",
+			err);
+		goto fail_dev;
+	}
 
 	/* fCAN clock: Pick External clock. If not available fallback to
 	 * CANFD clock
@@ -1906,10 +1910,12 @@ static int rcar_canfd_probe(struct platform_device *pdev)
 	gpriv->can_clk = devm_clk_get(&pdev->dev, "can_clk");
 	if (IS_ERR(gpriv->can_clk) || (clk_get_rate(gpriv->can_clk) == 0)) {
 		gpriv->can_clk = devm_clk_get(&pdev->dev, "canfd");
-		if (IS_ERR(gpriv->can_clk))
-			return dev_err_probe(&pdev->dev, PTR_ERR(gpriv->can_clk),
-					     "cannot get canfd clock\n");
-
+		if (IS_ERR(gpriv->can_clk)) {
+			err = PTR_ERR(gpriv->can_clk);
+			dev_err(&pdev->dev,
+				"cannot get canfd clock, error %d\n", err);
+			goto fail_dev;
+		}
 		gpriv->fcan = RCANFD_CANFDCLK;
 
 	} else {

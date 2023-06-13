@@ -17,6 +17,7 @@
 #include <linux/mutex.h>
 #include <linux/regmap.h>
 #include <linux/slab.h>
+#include <linux/delay.h>
 
 #define DRVNAME "nct7802"
 
@@ -48,6 +49,7 @@ static const u8 REG_VOLTAGE_LIMIT_MSB_SHIFT[2][5] = {
 #define REG_SMARTFAN_EN(x)      (0x64 + (x) / 2)
 #define SMARTFAN_EN_SHIFT(x)    ((x) % 2 * 4)
 #define REG_VENDOR_ID		0xfd
+#define REG_RESET			0xfc
 #define REG_CHIP_ID		0xfe
 #define REG_VERSION_ID		0xff
 
@@ -77,7 +79,14 @@ struct nct7802_data {
 	struct mutex access_lock; /* for multi-byte read and write operations */
 	u8 in_status;
 	struct mutex in_alarm_lock;
+	bool chip_initialized;
+	int err_count;
+	struct device *dev;
+	bool temp_is_visible[4];
 };
+
+#define MAX_ERRORS 10
+static int nct7802_check_errors(struct nct7802_data *data);
 
 static ssize_t temp_type_show(struct device *dev,
 			      struct device_attribute *attr, char *buf)
@@ -211,6 +220,9 @@ static int nct7802_read_temp(struct nct7802_data *data,
 	*temp = 0;
 
 	mutex_lock(&data->access_lock);
+	if (nct7802_check_errors(data) < 0)
+		goto abort;
+
 	err = regmap_read(data->regmap, reg_temp, &t1);
 	if (err < 0)
 		goto abort;
@@ -223,6 +235,8 @@ static int nct7802_read_temp(struct nct7802_data *data,
 	t1 |= t2 & 0xe0;
 	*temp = (s16)t1 / 32 * 125;
 abort:
+	if (err < 0)
+		data->err_count++;
 	mutex_unlock(&data->access_lock);
 	return err;
 }
@@ -233,6 +247,9 @@ static int nct7802_read_fan(struct nct7802_data *data, u8 reg_fan)
 	int ret;
 
 	mutex_lock(&data->access_lock);
+	if (nct7802_check_errors(data) < 0)
+		goto abort;
+
 	ret = regmap_read(data->regmap, reg_fan, &f1);
 	if (ret < 0)
 		goto abort;
@@ -246,6 +263,8 @@ static int nct7802_read_fan(struct nct7802_data *data, u8 reg_fan)
 	else if (ret)
 		ret = DIV_ROUND_CLOSEST(1350000U, ret);
 abort:
+	if (ret < 0)
+		data->err_count++;
 	mutex_unlock(&data->access_lock);
 	return ret;
 }
@@ -257,6 +276,9 @@ static int nct7802_read_fan_min(struct nct7802_data *data, u8 reg_fan_low,
 	int ret;
 
 	mutex_lock(&data->access_lock);
+	if (nct7802_check_errors(data) < 0)
+		goto abort;
+
 	ret = regmap_read(data->regmap, reg_fan_low, &f1);
 	if (ret < 0)
 		goto abort;
@@ -272,6 +294,8 @@ static int nct7802_read_fan_min(struct nct7802_data *data, u8 reg_fan_low,
 	else
 		ret = 1350000U;
 abort:
+	if (ret < 0)
+		data->err_count++;
 	mutex_unlock(&data->access_lock);
 	return ret;
 }
@@ -288,12 +312,17 @@ static int nct7802_write_fan_min(struct nct7802_data *data, u8 reg_fan_low,
 	limit = clamp_val(limit, 0, 0x1fff);
 
 	mutex_lock(&data->access_lock);
+	if (nct7802_check_errors(data) < 0)
+		goto abort;
+
 	err = regmap_write(data->regmap, reg_fan_low, limit & 0xff);
 	if (err < 0)
 		goto abort;
 
 	err = regmap_write(data->regmap, reg_fan_high, (limit & 0x1f00) >> 5);
 abort:
+	if (err < 0)
+		data->err_count++;
 	mutex_unlock(&data->access_lock);
 	return err;
 }
@@ -306,6 +335,9 @@ static int nct7802_read_voltage(struct nct7802_data *data, int nr, int index)
 	int ret;
 
 	mutex_lock(&data->access_lock);
+	if (nct7802_check_errors(data) < 0)
+		goto abort;
+
 	if (index == 0) {	/* voltage */
 		ret = regmap_read(data->regmap, REG_VOLTAGE[nr], &v1);
 		if (ret < 0)
@@ -328,6 +360,8 @@ static int nct7802_read_voltage(struct nct7802_data *data, int nr, int index)
 		ret = (v1 | ((v2 << shift) & 0x300)) * nct7802_vmul[nr];
 	}
 abort:
+	if (ret < 0)
+		data->err_count++;
 	mutex_unlock(&data->access_lock);
 	return ret;
 }
@@ -342,6 +376,9 @@ static int nct7802_write_voltage(struct nct7802_data *data, int nr, int index,
 	voltage = DIV_ROUND_CLOSEST(voltage, nct7802_vmul[nr]);
 
 	mutex_lock(&data->access_lock);
+	if (nct7802_check_errors(data) < 0)
+		goto abort;
+
 	err = regmap_write(data->regmap,
 			   REG_VOLTAGE_LIMIT_LSB[index - 1][nr],
 			   voltage & 0xff);
@@ -351,6 +388,8 @@ static int nct7802_write_voltage(struct nct7802_data *data, int nr, int index,
 	err = regmap_update_bits(data->regmap, REG_VOLTAGE_LIMIT_MSB[nr],
 				 0x0300 >> shift, (voltage & 0x0300) >> shift);
 abort:
+	if (err < 0)
+		data->err_count++;
 	mutex_unlock(&data->access_lock);
 	return err;
 }
@@ -395,7 +434,12 @@ static ssize_t in_alarm_show(struct device *dev, struct device_attribute *attr,
 	int volt, min, max, ret;
 	unsigned int val;
 
+	/* We don't use alarms here */
+    return 0;
+
 	mutex_lock(&data->in_alarm_lock);
+	if (nct7802_check_errors(data) < 0)
+		goto abort;
 
 	/*
 	 * The SMI Voltage status register is the only register giving a status
@@ -443,6 +487,8 @@ static ssize_t in_alarm_show(struct device *dev, struct device_attribute *attr,
 
 	ret = sprintf(buf, "%u\n", !!(data->in_status & (1 << sattr->index)));
 abort:
+	if (ret < 0)
+		data->err_count++;
 	mutex_unlock(&data->in_alarm_lock);
 	return ret;
 }
@@ -624,10 +670,6 @@ static SENSOR_DEVICE_ATTR_2_RO(temp3_crit_alarm, alarm, 0x1b, 2);
 static SENSOR_DEVICE_ATTR_2_RO(temp4_crit_alarm, alarm, 0x1b, 3);
 static SENSOR_DEVICE_ATTR_2_RO(temp5_crit_alarm, alarm, 0x1b, 4);
 
-static SENSOR_DEVICE_ATTR_2_RO(temp1_fault, alarm, 0x17, 0);
-static SENSOR_DEVICE_ATTR_2_RO(temp2_fault, alarm, 0x17, 1);
-static SENSOR_DEVICE_ATTR_2_RO(temp3_fault, alarm, 0x17, 2);
-
 static SENSOR_DEVICE_ATTR_2_RW(temp1_beep, beep, 0x5c, 0);
 static SENSOR_DEVICE_ATTR_2_RW(temp2_beep, beep, 0x5c, 1);
 static SENSOR_DEVICE_ATTR_2_RW(temp3_beep, beep, 0x5c, 2);
@@ -644,7 +686,6 @@ static struct attribute *nct7802_temp_attrs[] = {
 	&sensor_dev_attr_temp1_min_alarm.dev_attr.attr,
 	&sensor_dev_attr_temp1_max_alarm.dev_attr.attr,
 	&sensor_dev_attr_temp1_crit_alarm.dev_attr.attr,
-	&sensor_dev_attr_temp1_fault.dev_attr.attr,
 	&sensor_dev_attr_temp1_beep.dev_attr.attr,
 
 	&sensor_dev_attr_temp2_type.dev_attr.attr,		/* 10 */
@@ -655,7 +696,6 @@ static struct attribute *nct7802_temp_attrs[] = {
 	&sensor_dev_attr_temp2_min_alarm.dev_attr.attr,
 	&sensor_dev_attr_temp2_max_alarm.dev_attr.attr,
 	&sensor_dev_attr_temp2_crit_alarm.dev_attr.attr,
-	&sensor_dev_attr_temp2_fault.dev_attr.attr,
 	&sensor_dev_attr_temp2_beep.dev_attr.attr,
 
 	&sensor_dev_attr_temp3_type.dev_attr.attr,		/* 20 */
@@ -666,7 +706,6 @@ static struct attribute *nct7802_temp_attrs[] = {
 	&sensor_dev_attr_temp3_min_alarm.dev_attr.attr,
 	&sensor_dev_attr_temp3_max_alarm.dev_attr.attr,
 	&sensor_dev_attr_temp3_crit_alarm.dev_attr.attr,
-	&sensor_dev_attr_temp3_fault.dev_attr.attr,
 	&sensor_dev_attr_temp3_beep.dev_attr.attr,
 
 	&sensor_dev_attr_temp4_input.dev_attr.attr,		/* 30 */
@@ -701,22 +740,18 @@ static umode_t nct7802_temp_is_visible(struct kobject *kobj,
 	unsigned int reg;
 	int err;
 
-	err = regmap_read(data->regmap, REG_MODE, &reg);
-	if (err < 0)
+	if (index < 10 && ! data->temp_is_visible[1])	/* RD1 */
+		return 0;
+	if (index >= 10 && index < 20 && ! data->temp_is_visible[2])	/* RD2 */
+		return 0;
+	if (index >= 20 && index < 30 && ! data->temp_is_visible[3])	/* RD3 */
+		return 0;
+	if (index >= 38)				/* No other sensors */
 		return 0;
 
-	if (index < 10 &&
-	    (reg & 03) != 0x01 && (reg & 0x03) != 0x02)		/* RD1 */
-		return 0;
-
-	if (index >= 10 && index < 20 &&
-	    (reg & 0x0c) != 0x04 && (reg & 0x0c) != 0x08)	/* RD2 */
-		return 0;
-	if (index >= 20 && index < 30 && (reg & 0x30) != 0x20)	/* RD3 */
-		return 0;
-
-	if (index >= 30 && index < 38)				/* local */
-		return attr->mode;
+	return attr->mode;
+	/* We don't use PECI */
+	return 0;
 
 	err = regmap_read(data->regmap, REG_PECI_ENABLE, &reg);
 	if (err < 0)
@@ -803,6 +838,9 @@ static umode_t nct7802_in_is_visible(struct kobject *kobj,
 	if (index < 6)						/* VCC, VCORE */
 		return attr->mode;
 
+	/* We don't use other ADCs */
+	return 0;
+
 	err = regmap_read(data->regmap, REG_MODE, &reg);
 	if (err < 0)
 		return 0;
@@ -875,6 +913,9 @@ static umode_t nct7802_fan_is_visible(struct kobject *kobj,
 	int fan = index / 4;	/* 4 attributes per fan */
 	unsigned int reg;
 	int err;
+
+	/* Hack: We've never had fans connected to NCT7802 */
+	return 0;
 
 	err = regmap_read(data->regmap, REG_FAN_ENABLE, &reg);
 	if (err < 0 || !(reg & (1 << fan)))
@@ -1038,7 +1079,7 @@ static int nct7802_detect(struct i2c_client *client,
 	if (reg < 0 || (reg & 0x3f))
 		return -ENODEV;
 
-	strscpy(info->type, "nct7802", I2C_NAME_SIZE);
+	strlcpy(info->type, "nct7802", I2C_NAME_SIZE);
 	return 0;
 }
 
@@ -1057,7 +1098,7 @@ static const struct regmap_config nct7802_regmap_config = {
 
 static int nct7802_get_channel_config(struct device *dev,
 				      struct device_node *node, u8 *mode_mask,
-				      u8 *mode_val)
+				      u8 *mode_val, struct nct7802_data *data)
 {
 	u32 reg;
 	const char *type_str, *md_str;
@@ -1068,7 +1109,7 @@ static int nct7802_get_channel_config(struct device *dev,
 
 	if (of_property_read_u32(node, "reg", &reg)) {
 		dev_err(dev, "Could not read reg value for '%s'\n",
-			node->full_name);
+				node->full_name);
 		return -EINVAL;
 	}
 
@@ -1086,6 +1127,8 @@ static int nct7802_get_channel_config(struct device *dev,
 		*mode_mask |= MODE_LTD_EN;
 		return 0;
 	}
+
+	data->temp_is_visible[reg] = true;
 
 	/* At this point we have reg >= 1 && reg <= 3 */
 
@@ -1151,7 +1194,7 @@ static int nct7802_configure_channels(struct device *dev,
 	if (dev->of_node) {
 		for_each_child_of_node(dev->of_node, node) {
 			err = nct7802_get_channel_config(dev, node, &mode_mask,
-							 &mode_val);
+							 &mode_val, data);
 			if (err) {
 				of_node_put(node);
 				return err;
@@ -1162,21 +1205,47 @@ static int nct7802_configure_channels(struct device *dev,
 	return regmap_update_bits(data->regmap, REG_MODE, mode_mask, mode_val);
 }
 
+static int nct7802_init_chip(struct device *dev, struct nct7802_data *data);
+static int nct7802_check_errors(struct nct7802_data *data)
+{
+	if (!data)
+		return -EINVAL;
+
+	if (data->err_count > MAX_ERRORS) {
+		data->chip_initialized = false;
+		dev_dbg(data->dev, "Maximum number of errors exceeded, re-calibrating\n");
+	}
+
+	if (! data->chip_initialized)
+		return nct7802_init_chip(data->dev, data);
+
+	return 0;
+}
+
 static int nct7802_init_chip(struct device *dev, struct nct7802_data *data)
 {
 	int err;
 
+	dev_dbg(dev, "Initializing chip\n");
+	data->err_count = 0;
+
+	/* Reset chip */
+	err = regmap_write(data->regmap, REG_RESET, 0x80);
+	mdelay(100);
+
 	/* Enable ADC */
 	err = regmap_update_bits(data->regmap, REG_START, 0x01, 0x01);
-	if (err)
-		return err;
 
 	err = nct7802_configure_channels(dev, data);
-	if (err)
-		return err;
 
 	/* Enable Vcore and VCC voltage monitoring */
-	return regmap_update_bits(data->regmap, REG_VMON_ENABLE, 0x03, 0x03);
+	err = regmap_update_bits(data->regmap, REG_VMON_ENABLE, 0x03, 0x03);
+	if (!err) {
+		data->chip_initialized = true;
+		dev_dbg(dev, "Chip initialized\n");
+	}
+
+	return err;
 }
 
 static int nct7802_probe(struct i2c_client *client)
@@ -1184,7 +1253,7 @@ static int nct7802_probe(struct i2c_client *client)
 	struct device *dev = &client->dev;
 	struct nct7802_data *data;
 	struct device *hwmon_dev;
-	int ret;
+	int i, ret;
 
 	data = devm_kzalloc(dev, sizeof(*data), GFP_KERNEL);
 	if (data == NULL)
@@ -1196,14 +1265,24 @@ static int nct7802_probe(struct i2c_client *client)
 
 	mutex_init(&data->access_lock);
 	mutex_init(&data->in_alarm_lock);
+	data->chip_initialized = false;
+	data->err_count = 0;
+	data->dev = dev;
+
+	/* Internal thermal sensor is always visible */
+	data->temp_is_visible[0] = true;
+	for(i = 1; i < 4; i++)
+        data->temp_is_visible[i] = false;
 
 	ret = nct7802_init_chip(dev, data);
-	if (ret < 0)
-		return ret;
+	if (ret < 0) {
+		dev_err(dev, "Unable to initialize\n");
+	}
 
 	hwmon_dev = devm_hwmon_device_register_with_groups(dev, client->name,
 							   data,
 							   nct7802_groups);
+	dev_info(dev, "Probed\n");
 	return PTR_ERR_OR_ZERO(hwmon_dev);
 }
 

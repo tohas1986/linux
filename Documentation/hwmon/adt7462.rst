@@ -56,7 +56,7 @@ Configuration Notes
 
 Besides standard interfaces driver adds the following:
 
-* PWM Control
+* PWM Auto Control
 
 * pwm#_auto_point1_pwm and temp#_auto_point1_temp and
 * pwm#_auto_point2_pwm and temp#_auto_point2_temp -
@@ -68,3 +68,23 @@ The ADT7462 will scale the pwm between the lower and higher pwm speed when
 the temperature is between the two temperature boundaries.  PWM values range
 from 0 (off) to 255 (full speed).  Fan speed will be set to maximum when the
 temperature sensor associated with the PWM control exceeds temp#_max.
+
+* PWM Manual Control
+The ADT7462 can operate in manual mode for PWM control.
+Below is the typical flow to contol PWM manually.
+(Example for PWM1 which controls fan1)
+
+  - Set PWM to manual mode
+    - echo 1 > pwm1_enable
+  - Enable High Freq Mode (optional)
+    -  echo 1 > pwm_freq_mode
+  - Set fan1 as present
+    - echo 1 > fan1_presence
+  - Start TACH measurement for fan1
+    - echo 1 > fan1_tach_enable
+  - Mark as setup complete. This will start monitoring of all enabled channels.
+    - echo 1 > setup_complete
+  - Read fan1 RPM
+    -  cat fan1_input
+  - Change PWM1 to 75% (192/255)
+    - echo 192 > pwm1

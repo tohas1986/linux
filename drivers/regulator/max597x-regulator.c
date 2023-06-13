@@ -137,7 +137,7 @@ static int max597x_set_ovp(struct regulator_dev *rdev, int lim_uV, int severity,
 static int max597x_set_ocp(struct regulator_dev *rdev, int lim_uA,
 			   int severity, bool enable)
 {
-	int val, reg;
+	int ret, val, reg;
 	unsigned int vthst, vthfst;
 
 	struct max597x_regulator *data = rdev_get_drvdata(rdev);
@@ -183,8 +183,9 @@ static int max597x_set_ocp(struct regulator_dev *rdev, int lim_uA,
 		val = 0xFF;
 
 	reg = MAX5970_REG_DAC_FAST(rdev_id);
+	ret = regmap_write(rdev->regmap, reg, val);
 
-	return regmap_write(rdev->regmap, reg, val);
+	return ret;
 }
 
 static int max597x_get_status(struct regulator_dev *rdev)

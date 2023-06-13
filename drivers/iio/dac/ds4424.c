@@ -281,13 +281,15 @@ fail:
 	return ret;
 }
 
-static void ds4424_remove(struct i2c_client *client)
+static int ds4424_remove(struct i2c_client *client)
 {
 	struct iio_dev *indio_dev = i2c_get_clientdata(client);
 	struct ds4424_data *data = iio_priv(indio_dev);
 
 	iio_device_unregister(indio_dev);
 	regulator_disable(data->vcc_reg);
+
+	return 0;
 }
 
 static const struct i2c_device_id ds4424_id[] = {

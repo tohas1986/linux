@@ -19,7 +19,6 @@ struct perf_evlist {
 	int			 nr_entries;
 	int			 nr_groups;
 	bool			 has_user_cpus;
-	bool			 needs_map_propagation;
 	/**
 	 * The cpus passed from the command line or all online CPUs by
 	 * default.

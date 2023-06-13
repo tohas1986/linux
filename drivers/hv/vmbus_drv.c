@@ -46,6 +46,8 @@ struct vmbus_dynid {
 
 static struct acpi_device  *hv_acpi_dev;
 
+static struct completion probe_event;
+
 static int hyperv_cpuhp_online;
 
 static void *hv_panic_page;
@@ -1130,8 +1132,7 @@ void vmbus_on_msg_dpc(unsigned long data)
 			return;
 
 		INIT_WORK(&ctx->work, vmbus_onmessage_work);
-		ctx->msg.header = msg_copy.header;
-		memcpy(&ctx->msg.payload, msg_copy.u.payload, payload_size);
+		memcpy(&ctx->msg, &msg_copy, sizeof(msg->header) + payload_size);
 
 		/*
 		 * The host can generate a rescind message while we
@@ -1572,7 +1573,7 @@ err_setup:
 }
 
 /**
- * __vmbus_driver_register() - Register a vmbus's driver
+ * __vmbus_child_driver_register() - Register a vmbus's driver
  * @hv_driver: Pointer to driver structure you want to register
  * @owner: owner module of the drv
  * @mod_name: module name string
@@ -2051,7 +2052,7 @@ struct hv_device *vmbus_device_create(const guid_t *type,
 	child_device_obj->channel = channel;
 	guid_copy(&child_device_obj->dev_type, type);
 	guid_copy(&child_device_obj->dev_instance, instance);
-	child_device_obj->vendor_id = PCI_VENDOR_ID_MICROSOFT;
+	child_device_obj->vendor_id = 0x1414; /* MSFT vendor ID */
 
 	return child_device_obj;
 }
@@ -2082,7 +2083,6 @@ int vmbus_device_register(struct hv_device *child_device_obj)
 	ret = device_register(&child_device_obj->device);
 	if (ret) {
 		pr_err("Unable to register child device\n");
-		put_device(&child_device_obj->device);
 		return ret;
 	}
 
@@ -2453,8 +2453,7 @@ static int vmbus_acpi_add(struct acpi_device *device)
 	 * Some ancestor of the vmbus acpi device (Gen1 or Gen2
 	 * firmware) is the VMOD that has the mmio ranges. Get that.
 	 */
-	for (ancestor = acpi_dev_parent(device); ancestor;
-	     ancestor = acpi_dev_parent(ancestor)) {
+	for (ancestor = device->parent; ancestor; ancestor = ancestor->parent) {
 		result = acpi_walk_resources(ancestor->handle, METHOD_NAME__CRS,
 					     vmbus_walk_resources, NULL);
 
@@ -2468,6 +2467,7 @@ static int vmbus_acpi_add(struct acpi_device *device)
 	ret_val = 0;
 
 acpi_walk_err:
+	complete(&probe_event);
 	if (ret_val)
 		vmbus_acpi_remove(device);
 	return ret_val;
@@ -2646,7 +2646,6 @@ static struct acpi_driver vmbus_acpi_driver = {
 		.remove = vmbus_acpi_remove,
 	},
 	.drv.pm = &vmbus_bus_pm,
-	.drv.probe_type = PROBE_FORCE_SYNCHRONOUS,
 };
 
 static void hv_kexec_handler(void)
@@ -2719,13 +2718,15 @@ static struct syscore_ops hv_synic_syscore_ops = {
 
 static int __init hv_acpi_init(void)
 {
-	int ret;
+	int ret, t;
 
 	if (!hv_is_hyperv_initialized())
 		return -ENODEV;
 
 	if (hv_root_partition)
 		return 0;
+
+	init_completion(&probe_event);
 
 	/*
 	 * Get ACPI resources first.
@@ -2735,8 +2736,9 @@ static int __init hv_acpi_init(void)
 	if (ret)
 		return ret;
 
-	if (!hv_acpi_dev) {
-		ret = -ENODEV;
+	t = wait_for_completion_timeout(&probe_event, 5*HZ);
+	if (t == 0) {
+		ret = -ETIMEDOUT;
 		goto cleanup;
 	}
 

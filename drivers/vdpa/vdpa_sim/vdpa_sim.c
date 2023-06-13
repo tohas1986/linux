@@ -18,7 +18,6 @@
 #include <linux/vdpa.h>
 #include <linux/vhost_iotlb.h>
 #include <linux/iova.h>
-#include <uapi/linux/vdpa.h>
 
 #include "vdpa_sim.h"
 
@@ -67,7 +66,8 @@ static void vdpasim_queue_ready(struct vdpasim *vdpasim, unsigned int idx)
 {
 	struct vdpasim_virtqueue *vq = &vdpasim->vqs[idx];
 
-	vringh_init_iotlb(&vq->vring, vdpasim->features, vq->num, false,
+	vringh_init_iotlb(&vq->vring, vdpasim->dev_attr.supported_features,
+			  VDPASIM_QUEUE_MAX, false,
 			  (struct vring_desc *)(uintptr_t)vq->desc_addr,
 			  (struct vring_avail *)
 			  (uintptr_t)vq->driver_addr,
@@ -245,21 +245,12 @@ static const struct dma_map_ops vdpasim_dma_ops = {
 static const struct vdpa_config_ops vdpasim_config_ops;
 static const struct vdpa_config_ops vdpasim_batch_config_ops;
 
-struct vdpasim *vdpasim_create(struct vdpasim_dev_attr *dev_attr,
-			       const struct vdpa_dev_set_config *config)
+struct vdpasim *vdpasim_create(struct vdpasim_dev_attr *dev_attr)
 {
 	const struct vdpa_config_ops *ops;
 	struct vdpasim *vdpasim;
 	struct device *dev;
 	int i, ret = -ENOMEM;
-
-	if (config->mask & BIT_ULL(VDPA_ATTR_DEV_FEATURES)) {
-		if (config->device_features &
-		    ~dev_attr->supported_features)
-			return ERR_PTR(-EINVAL);
-		dev_attr->supported_features =
-			config->device_features;
-	}
 
 	if (batch_mapping)
 		ops = &vdpasim_batch_config_ops;
@@ -689,9 +680,7 @@ static void vdpasim_free(struct vdpa_device *vdpa)
 	}
 
 	kvfree(vdpasim->buffer);
-	for (i = 0; i < vdpasim->dev_attr.nas; i++)
-		vhost_iotlb_reset(&vdpasim->iommu[i]);
-	kfree(vdpasim->iommu);
+	vhost_iotlb_free(vdpasim->iommu);
 	kfree(vdpasim->vqs);
 	kfree(vdpasim->config);
 }

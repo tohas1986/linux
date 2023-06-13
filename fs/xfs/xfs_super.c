@@ -2028,14 +2028,18 @@ xfs_init_caches(void)
 		goto out_destroy_trans_cache;
 
 	xfs_efd_cache = kmem_cache_create("xfs_efd_item",
-			xfs_efd_log_item_sizeof(XFS_EFD_MAX_FAST_EXTENTS),
-			0, 0, NULL);
+					(sizeof(struct xfs_efd_log_item) +
+					(XFS_EFD_MAX_FAST_EXTENTS - 1) *
+					sizeof(struct xfs_extent)),
+					0, 0, NULL);
 	if (!xfs_efd_cache)
 		goto out_destroy_buf_item_cache;
 
 	xfs_efi_cache = kmem_cache_create("xfs_efi_item",
-			xfs_efi_log_item_sizeof(XFS_EFI_MAX_FAST_EXTENTS),
-			0, 0, NULL);
+					 (sizeof(struct xfs_efi_log_item) +
+					 (XFS_EFI_MAX_FAST_EXTENTS - 1) *
+					 sizeof(struct xfs_extent)),
+					 0, 0, NULL);
 	if (!xfs_efi_cache)
 		goto out_destroy_efd_cache;
 

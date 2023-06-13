@@ -449,7 +449,7 @@ static int s3c24xx_spi_probe(struct platform_device *pdev)
 	struct spi_master *master;
 	int err = 0;
 
-	master = devm_spi_alloc_master(&pdev->dev, sizeof(struct s3c24xx_spi));
+	master = spi_alloc_master(&pdev->dev, sizeof(struct s3c24xx_spi));
 	if (master == NULL) {
 		dev_err(&pdev->dev, "No memory for spi_master\n");
 		return -ENOMEM;
@@ -463,7 +463,8 @@ static int s3c24xx_spi_probe(struct platform_device *pdev)
 
 	if (pdata == NULL) {
 		dev_err(&pdev->dev, "No platform data supplied\n");
-		return -ENOENT;
+		err = -ENOENT;
+		goto err_no_pdata;
 	}
 
 	platform_set_drvdata(pdev, hw);
@@ -498,24 +499,29 @@ static int s3c24xx_spi_probe(struct platform_device *pdev)
 
 	/* find and map our resources */
 	hw->regs = devm_platform_ioremap_resource(pdev, 0);
-	if (IS_ERR(hw->regs))
-		return PTR_ERR(hw->regs);
+	if (IS_ERR(hw->regs)) {
+		err = PTR_ERR(hw->regs);
+		goto err_no_pdata;
+	}
 
 	hw->irq = platform_get_irq(pdev, 0);
-	if (hw->irq < 0)
-		return -ENOENT;
+	if (hw->irq < 0) {
+		err = -ENOENT;
+		goto err_no_pdata;
+	}
 
 	err = devm_request_irq(&pdev->dev, hw->irq, s3c24xx_spi_irq, 0,
 				pdev->name, hw);
 	if (err) {
 		dev_err(&pdev->dev, "Cannot claim IRQ\n");
-		return err;
+		goto err_no_pdata;
 	}
 
 	hw->clk = devm_clk_get(&pdev->dev, "spi");
 	if (IS_ERR(hw->clk)) {
 		dev_err(&pdev->dev, "No clock for device\n");
-		return PTR_ERR(hw->clk);
+		err = PTR_ERR(hw->clk);
+		goto err_no_pdata;
 	}
 
 	s3c24xx_spi_initialsetup(hw);
@@ -533,6 +539,8 @@ static int s3c24xx_spi_probe(struct platform_device *pdev)
  err_register:
 	clk_disable(hw->clk);
 
+ err_no_pdata:
+	spi_master_put(hw->master);
 	return err;
 }
 

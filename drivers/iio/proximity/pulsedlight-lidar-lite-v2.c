@@ -311,7 +311,7 @@ error_unreg_buffer:
 	return ret;
 }
 
-static void lidar_remove(struct i2c_client *client)
+static int lidar_remove(struct i2c_client *client)
 {
 	struct iio_dev *indio_dev = i2c_get_clientdata(client);
 
@@ -320,6 +320,8 @@ static void lidar_remove(struct i2c_client *client)
 
 	pm_runtime_disable(&client->dev);
 	pm_runtime_set_suspended(&client->dev);
+
+	return 0;
 }
 
 static const struct i2c_device_id lidar_id[] = {

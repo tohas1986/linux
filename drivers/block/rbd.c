@@ -7222,10 +7222,8 @@ static int __init rbd_sysfs_init(void)
 	int ret;
 
 	ret = device_register(&rbd_root_dev);
-	if (ret < 0) {
-		put_device(&rbd_root_dev);
+	if (ret < 0)
 		return ret;
-	}
 
 	ret = bus_register(&rbd_bus_type);
 	if (ret < 0)

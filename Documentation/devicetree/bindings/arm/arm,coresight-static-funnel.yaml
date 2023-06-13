@@ -27,9 +27,6 @@ properties:
   compatible:
     const: arm,coresight-static-funnel
 
-  power-domains:
-    maxItems: 1
-
   in-ports:
     $ref: /schemas/graph.yaml#/properties/ports
 

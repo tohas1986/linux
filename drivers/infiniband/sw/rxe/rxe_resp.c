@@ -1026,41 +1026,50 @@ finish:
 		return RESPST_CLEANUP;
 }
 
-
-static int send_common_ack(struct rxe_qp *qp, u8 syndrome, u32 psn,
-				  int opcode, const char *msg)
+static int send_ack(struct rxe_qp *qp, u8 syndrome, u32 psn)
 {
-	int err;
+	int err = 0;
 	struct rxe_pkt_info ack_pkt;
 	struct sk_buff *skb;
 
-	skb = prepare_ack_packet(qp, &ack_pkt, opcode, 0, psn, syndrome);
-	if (!skb)
-		return -ENOMEM;
+	skb = prepare_ack_packet(qp, &ack_pkt, IB_OPCODE_RC_ACKNOWLEDGE,
+				 0, psn, syndrome);
+	if (!skb) {
+		err = -ENOMEM;
+		goto err1;
+	}
 
 	err = rxe_xmit_packet(qp, &ack_pkt, skb);
 	if (err)
-		pr_err_ratelimited("Failed sending %s\n", msg);
+		pr_err_ratelimited("Failed sending ack\n");
 
+err1:
 	return err;
-}
-
-static int send_ack(struct rxe_qp *qp, u8 syndrome, u32 psn)
-{
-	return send_common_ack(qp, syndrome, psn,
-			IB_OPCODE_RC_ACKNOWLEDGE, "ACK");
 }
 
 static int send_atomic_ack(struct rxe_qp *qp, u8 syndrome, u32 psn)
 {
-	int ret = send_common_ack(qp, syndrome, psn,
-			IB_OPCODE_RC_ATOMIC_ACKNOWLEDGE, "ATOMIC ACK");
+	int err = 0;
+	struct rxe_pkt_info ack_pkt;
+	struct sk_buff *skb;
+
+	skb = prepare_ack_packet(qp, &ack_pkt, IB_OPCODE_RC_ATOMIC_ACKNOWLEDGE,
+				 0, psn, syndrome);
+	if (!skb) {
+		err = -ENOMEM;
+		goto out;
+	}
+
+	err = rxe_xmit_packet(qp, &ack_pkt, skb);
+	if (err)
+		pr_err_ratelimited("Failed sending atomic ack\n");
 
 	/* have to clear this since it is used to trigger
 	 * long read replies
 	 */
 	qp->resp.res = NULL;
-	return ret;
+out:
+	return err;
 }
 
 static enum resp_states acknowledge(struct rxe_qp *qp,

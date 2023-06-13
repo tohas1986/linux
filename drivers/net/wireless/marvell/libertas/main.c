@@ -39,7 +39,8 @@ unsigned int lbs_debug;
 EXPORT_SYMBOL_GPL(lbs_debug);
 module_param_named(libertas_debug, lbs_debug, int, 0644);
 
-static unsigned int lbs_disablemesh;
+unsigned int lbs_disablemesh;
+EXPORT_SYMBOL_GPL(lbs_disablemesh);
 module_param_named(libertas_disablemesh, lbs_disablemesh, int, 0644);
 
 

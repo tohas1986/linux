@@ -43,6 +43,8 @@
 #include <linux/hmm.h>
 #include <linux/pagemap.h>
 
+#include <rdma/ib_verbs.h>
+#include <rdma/ib_umem.h>
 #include <rdma/ib_umem_odp.h>
 
 #include "uverbs.h"

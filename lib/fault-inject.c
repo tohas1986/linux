@@ -41,6 +41,9 @@ EXPORT_SYMBOL_GPL(setup_fault_attr);
 
 static void fail_dump(struct fault_attr *attr)
 {
+	if (attr->no_warn)
+		return;
+
 	if (attr->verbose > 0 && __ratelimit(&attr->ratelimit_state)) {
 		printk(KERN_NOTICE "FAULT_INJECTION: forcing a failure.\n"
 		       "name %pd, interval %lu, probability %lu, "
@@ -100,7 +103,7 @@ static inline bool fail_stacktrace(struct fault_attr *attr)
  * http://www.nongnu.org/failmalloc/
  */
 
-bool should_fail_ex(struct fault_attr *attr, ssize_t size, int flags)
+bool should_fail(struct fault_attr *attr, ssize_t size)
 {
 	if (in_task()) {
 		unsigned int fail_nth = READ_ONCE(current->fail_nth);
@@ -136,25 +139,19 @@ bool should_fail_ex(struct fault_attr *attr, ssize_t size, int flags)
 			return false;
 	}
 
-	if (attr->probability <= prandom_u32_max(100))
+	if (attr->probability <= prandom_u32() % 100)
 		return false;
 
 	if (!fail_stacktrace(attr))
 		return false;
 
 fail:
-	if (!(flags & FAULT_NOWARN))
-		fail_dump(attr);
+	fail_dump(attr);
 
 	if (atomic_read(&attr->times) != -1)
 		atomic_dec_not_zero(&attr->times);
 
 	return true;
-}
-
-bool should_fail(struct fault_attr *attr, ssize_t size)
-{
-	return should_fail_ex(attr, size, 0);
 }
 EXPORT_SYMBOL_GPL(should_fail);
 

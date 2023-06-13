@@ -667,7 +667,8 @@ static void ext4_es_insert_extent_ext_check(struct inode *inode,
 		}
 	}
 out:
-	ext4_free_ext_path(path);
+	ext4_ext_drop_refs(path);
+	kfree(path);
 }
 
 static void ext4_es_insert_extent_ind_check(struct inode *inode,
@@ -1371,7 +1372,7 @@ retry:
 		if (count_reserved)
 			count_rsvd(inode, lblk, orig_es.es_len - len1 - len2,
 				   &orig_es, &rc);
-		goto out_get_reserved;
+		goto out;
 	}
 
 	if (len1 > 0) {
@@ -1413,7 +1414,6 @@ retry:
 		}
 	}
 
-out_get_reserved:
 	if (count_reserved)
 		*reserved = get_rsvd(inode, end, es, &rc);
 out:

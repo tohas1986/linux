@@ -37,14 +37,13 @@
 #include "intel_display_types.h"
 #include "intel_drrs.h"
 #include "intel_panel.h"
-#include "intel_quirks.h"
 
 bool intel_panel_use_ssc(struct drm_i915_private *i915)
 {
 	if (i915->params.panel_use_ssc >= 0)
 		return i915->params.panel_use_ssc != 0;
-	return i915->display.vbt.lvds_use_ssc &&
-		!intel_has_quirk(i915, QUIRK_LVDS_SSC_DISABLE);
+	return i915->vbt.lvds_use_ssc
+		&& !(i915->quirks & QUIRK_LVDS_SSC_DISABLE);
 }
 
 const struct drm_display_mode *
@@ -85,10 +84,9 @@ static bool is_alt_drrs_mode(const struct drm_display_mode *mode,
 static bool is_alt_fixed_mode(const struct drm_display_mode *mode,
 			      const struct drm_display_mode *preferred_mode)
 {
-	u32 sync_flags = DRM_MODE_FLAG_PHSYNC | DRM_MODE_FLAG_NHSYNC |
-		DRM_MODE_FLAG_PVSYNC | DRM_MODE_FLAG_NVSYNC;
-
-	return (mode->flags & ~sync_flags) == (preferred_mode->flags & ~sync_flags) &&
+	return drm_mode_match(mode, preferred_mode,
+			      DRM_MODE_MATCH_FLAGS |
+			      DRM_MODE_MATCH_3D_FLAGS) &&
 		mode->hdisplay == preferred_mode->hdisplay &&
 		mode->vdisplay == preferred_mode->vdisplay;
 }
@@ -110,21 +108,6 @@ intel_panel_downclock_mode(struct intel_connector *connector,
 			max_vrefresh = vrefresh;
 			best_mode = fixed_mode;
 		}
-	}
-
-	return best_mode;
-}
-
-const struct drm_display_mode *
-intel_panel_highest_mode(struct intel_connector *connector,
-			 const struct drm_display_mode *adjusted_mode)
-{
-	const struct drm_display_mode *fixed_mode, *best_mode = adjusted_mode;
-
-	/* pick the fixed_mode that has the highest clock */
-	list_for_each_entry(fixed_mode, &connector->panel.fixed_modes, head) {
-		if (fixed_mode->clock > best_mode->clock)
-			best_mode = fixed_mode;
 	}
 
 	return best_mode;

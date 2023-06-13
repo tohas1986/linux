@@ -581,6 +581,7 @@ static int clk_sama7g5_master_determine_rate(struct clk_hw *hw,
 					     struct clk_rate_request *req)
 {
 	struct clk_master *master = to_clk_master(hw);
+	struct clk_rate_request req_parent = *req;
 	struct clk_hw *parent;
 	long best_rate = LONG_MIN, best_diff = LONG_MIN;
 	unsigned long parent_rate;
@@ -617,15 +618,11 @@ static int clk_sama7g5_master_determine_rate(struct clk_hw *hw,
 		goto end;
 
 	for (div = 0; div < MASTER_PRES_MAX + 1; div++) {
-		struct clk_rate_request req_parent;
-		unsigned long req_rate;
-
 		if (div == MASTER_PRES_MAX)
-			req_rate = req->rate * 3;
+			req_parent.rate = req->rate * 3;
 		else
-			req_rate = req->rate << div;
+			req_parent.rate = req->rate << div;
 
-		clk_hw_forward_rate_request(hw, req, parent, &req_parent, req_rate);
 		if (__clk_determine_rate(parent, &req_parent))
 			continue;
 

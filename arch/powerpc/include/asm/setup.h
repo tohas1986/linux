@@ -7,6 +7,7 @@
 #ifndef __ASSEMBLY__
 extern void ppc_printk_progress(char *s, unsigned short hex);
 
+extern unsigned int rtas_data;
 extern unsigned long long memory_limit;
 extern void *zalloc_maybe_bootmem(size_t size, gfp_t mask);
 
@@ -69,7 +70,7 @@ void do_barrier_nospec_fixups_range(bool enable, void *start, void *end);
 static inline void do_barrier_nospec_fixups_range(bool enable, void *start, void *end) { }
 #endif
 
-#ifdef CONFIG_PPC_E500
+#ifdef CONFIG_PPC_FSL_BOOK3E
 void __init setup_spectre_v2(void);
 #else
 static inline void setup_spectre_v2(void) {}
@@ -87,8 +88,6 @@ void early_setup_secondary(void);
 unsigned long __init prom_init(unsigned long r3, unsigned long r4,
 			       unsigned long pp, unsigned long r6,
 			       unsigned long r7, unsigned long kbase);
-
-extern struct seq_buf ppc_hw_desc;
 
 #endif /* !__ASSEMBLY__ */
 

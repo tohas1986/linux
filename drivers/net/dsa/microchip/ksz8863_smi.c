@@ -180,6 +180,8 @@ static void ksz8863_smi_remove(struct mdio_device *mdiodev)
 
 	if (dev)
 		ksz_switch_remove(dev);
+
+	dev_set_drvdata(&mdiodev->dev, NULL);
 }
 
 static void ksz8863_smi_shutdown(struct mdio_device *mdiodev)

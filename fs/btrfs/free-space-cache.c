@@ -48,24 +48,6 @@ static void bitmap_clear_bits(struct btrfs_free_space_ctl *ctl,
 			      struct btrfs_free_space *info, u64 offset,
 			      u64 bytes, bool update_stats);
 
-static void __btrfs_remove_free_space_cache(struct btrfs_free_space_ctl *ctl)
-{
-	struct btrfs_free_space *info;
-	struct rb_node *node;
-
-	while ((node = rb_last(&ctl->free_space_offset)) != NULL) {
-		info = rb_entry(node, struct btrfs_free_space, offset_index);
-		if (!info->bitmap) {
-			unlink_free_space(ctl, info, true);
-			kmem_cache_free(btrfs_free_space_cachep, info);
-		} else {
-			free_bitmap(ctl, info);
-		}
-
-		cond_resched_lock(&ctl->tree_lock);
-	}
-}
-
 static struct inode *__lookup_free_space_inode(struct btrfs_root *root,
 					       struct btrfs_path *path,
 					       u64 offset)
@@ -144,8 +126,10 @@ struct inode *lookup_free_space_inode(struct btrfs_block_group *block_group,
 		block_group->disk_cache_state = BTRFS_DC_CLEAR;
 	}
 
-	if (!test_and_set_bit(BLOCK_GROUP_FLAG_IREF, &block_group->runtime_flags))
+	if (!block_group->iref) {
 		block_group->inode = igrab(inode);
+		block_group->iref = 1;
+	}
 	spin_unlock(&block_group->lock);
 
 	return inode;
@@ -257,7 +241,8 @@ int btrfs_remove_free_space_inode(struct btrfs_trans_handle *trans,
 	clear_nlink(inode);
 	/* One for the block groups ref */
 	spin_lock(&block_group->lock);
-	if (test_and_clear_bit(BLOCK_GROUP_FLAG_IREF, &block_group->runtime_flags)) {
+	if (block_group->iref) {
+		block_group->iref = 0;
 		block_group->inode = NULL;
 		spin_unlock(&block_group->lock);
 		iput(inode);
@@ -348,8 +333,8 @@ int btrfs_truncate_free_space_cache(struct btrfs_trans_handle *trans,
 	btrfs_i_size_write(inode, 0);
 	truncate_pagecache(vfs_inode, 0);
 
-	lock_extent(&inode->io_tree, 0, (u64)-1, &cached_state);
-	btrfs_drop_extent_map_range(inode, 0, (u64)-1, false);
+	lock_extent_bits(&inode->io_tree, 0, (u64)-1, &cached_state);
+	btrfs_drop_extent_cache(inode, 0, (u64)-1, 0);
 
 	/*
 	 * We skip the throttling logic for free space cache inodes, so we don't
@@ -360,7 +345,7 @@ int btrfs_truncate_free_space_cache(struct btrfs_trans_handle *trans,
 	inode_sub_bytes(&inode->vfs_inode, control.sub_bytes);
 	btrfs_inode_safe_disk_i_size_write(inode, control.last_size);
 
-	unlock_extent(&inode->io_tree, 0, (u64)-1, &cached_state);
+	unlock_extent_cached(&inode->io_tree, 0, (u64)-1, &cached_state);
 	if (ret)
 		goto fail;
 
@@ -896,10 +881,7 @@ out:
 	return ret;
 free_cache:
 	io_ctl_drop_pages(&io_ctl);
-
-	spin_lock(&ctl->tree_lock);
 	__btrfs_remove_free_space_cache(ctl);
-	spin_unlock(&ctl->tree_lock);
 	goto out;
 }
 
@@ -937,8 +919,6 @@ static int copy_free_space_cache(struct btrfs_block_group *block_group,
 	}
 	return ret;
 }
-
-static struct lock_class_key btrfs_free_space_inode_key;
 
 int load_free_space_cache(struct btrfs_block_group *block_group)
 {
@@ -1009,14 +989,6 @@ int load_free_space_cache(struct btrfs_block_group *block_group)
 	}
 	spin_unlock(&block_group->lock);
 
-	/*
-	 * Reinitialize the class of struct inode's mapping->invalidate_lock for
-	 * free space inodes to prevent false positives related to locks for normal
-	 * inodes.
-	 */
-	lockdep_set_class(&(&inode->i_data)->invalidate_lock,
-			  &btrfs_free_space_inode_key);
-
 	ret = __load_free_space_cache(fs_info->tree_root, inode, &tmp_ctl,
 				      path, block_group->start);
 	btrfs_free_path(path);
@@ -1035,13 +1007,7 @@ int load_free_space_cache(struct btrfs_block_group *block_group)
 		if (ret == 0)
 			ret = 1;
 	} else {
-		/*
-		 * We need to call the _locked variant so we don't try to update
-		 * the discard counters.
-		 */
-		spin_lock(&tmp_ctl.tree_lock);
 		__btrfs_remove_free_space_cache(&tmp_ctl);
-		spin_unlock(&tmp_ctl.tree_lock);
 		btrfs_warn(fs_info,
 			   "block group %llu has wrong amount of free space",
 			   block_group->start);
@@ -1163,7 +1129,7 @@ update_cache_item(struct btrfs_trans_handle *trans,
 	ret = btrfs_search_slot(trans, root, &key, path, 0, 1);
 	if (ret < 0) {
 		clear_extent_bit(&BTRFS_I(inode)->io_tree, 0, inode->i_size - 1,
-				 EXTENT_DELALLOC, NULL);
+				 EXTENT_DELALLOC, 0, 0, NULL);
 		goto fail;
 	}
 	leaf = path->nodes[0];
@@ -1175,8 +1141,8 @@ update_cache_item(struct btrfs_trans_handle *trans,
 		if (found_key.objectid != BTRFS_FREE_SPACE_OBJECTID ||
 		    found_key.offset != offset) {
 			clear_extent_bit(&BTRFS_I(inode)->io_tree, 0,
-					 inode->i_size - 1, EXTENT_DELALLOC,
-					 NULL);
+					 inode->i_size - 1, EXTENT_DELALLOC, 0,
+					 0, NULL);
 			btrfs_release_path(path);
 			goto fail;
 		}
@@ -1272,7 +1238,7 @@ static int flush_dirty_cache(struct inode *inode)
 	ret = btrfs_wait_ordered_range(inode, 0, (u64)-1);
 	if (ret)
 		clear_extent_bit(&BTRFS_I(inode)->io_tree, 0, inode->i_size - 1,
-				 EXTENT_DELALLOC, NULL);
+				 EXTENT_DELALLOC, 0, 0, NULL);
 
 	return ret;
 }
@@ -1292,8 +1258,8 @@ cleanup_write_cache_enospc(struct inode *inode,
 			   struct extent_state **cached_state)
 {
 	io_ctl_drop_pages(io_ctl);
-	unlock_extent(&BTRFS_I(inode)->io_tree, 0, i_size_read(inode) - 1,
-		      cached_state);
+	unlock_extent_cached(&BTRFS_I(inode)->io_tree, 0,
+			     i_size_read(inode) - 1, cached_state);
 }
 
 static int __btrfs_wait_cache_io(struct btrfs_root *root,
@@ -1418,8 +1384,8 @@ static int __btrfs_write_out_cache(struct btrfs_root *root, struct inode *inode,
 	if (ret)
 		goto out_unlock;
 
-	lock_extent(&BTRFS_I(inode)->io_tree, 0, i_size_read(inode) - 1,
-		    &cached_state);
+	lock_extent_bits(&BTRFS_I(inode)->io_tree, 0, i_size_read(inode) - 1,
+			 &cached_state);
 
 	io_ctl_set_generation(io_ctl, trans->transid);
 
@@ -1474,8 +1440,8 @@ static int __btrfs_write_out_cache(struct btrfs_root *root, struct inode *inode,
 	io_ctl_drop_pages(io_ctl);
 	io_ctl_free(io_ctl);
 
-	unlock_extent(&BTRFS_I(inode)->io_tree, 0, i_size_read(inode) - 1,
-		      &cached_state);
+	unlock_extent_cached(&BTRFS_I(inode)->io_tree, 0,
+			     i_size_read(inode) - 1, &cached_state);
 
 	/*
 	 * at this point the pages are under IO and we're happy,
@@ -2900,8 +2866,7 @@ void btrfs_dump_free_space(struct btrfs_block_group *block_group,
 	if (btrfs_is_zoned(fs_info)) {
 		btrfs_info(fs_info, "free space %llu active %d",
 			   block_group->zone_capacity - block_group->alloc_offset,
-			   test_bit(BLOCK_GROUP_FLAG_ZONE_IS_ACTIVE,
-				    &block_group->runtime_flags));
+			   block_group->zone_is_active);
 		return;
 	}
 
@@ -3005,6 +2970,34 @@ static void __btrfs_return_cluster_to_free_space(
 	btrfs_put_block_group(block_group);
 }
 
+static void __btrfs_remove_free_space_cache_locked(
+				struct btrfs_free_space_ctl *ctl)
+{
+	struct btrfs_free_space *info;
+	struct rb_node *node;
+
+	while ((node = rb_last(&ctl->free_space_offset)) != NULL) {
+		info = rb_entry(node, struct btrfs_free_space, offset_index);
+		if (!info->bitmap) {
+			unlink_free_space(ctl, info, true);
+			kmem_cache_free(btrfs_free_space_cachep, info);
+		} else {
+			free_bitmap(ctl, info);
+		}
+
+		cond_resched_lock(&ctl->tree_lock);
+	}
+}
+
+void __btrfs_remove_free_space_cache(struct btrfs_free_space_ctl *ctl)
+{
+	spin_lock(&ctl->tree_lock);
+	__btrfs_remove_free_space_cache_locked(ctl);
+	if (ctl->block_group)
+		btrfs_discard_update_discardable(ctl->block_group);
+	spin_unlock(&ctl->tree_lock);
+}
+
 void btrfs_remove_free_space_cache(struct btrfs_block_group *block_group)
 {
 	struct btrfs_free_space_ctl *ctl = block_group->free_space_ctl;
@@ -3022,7 +3015,7 @@ void btrfs_remove_free_space_cache(struct btrfs_block_group *block_group)
 
 		cond_resched_lock(&ctl->tree_lock);
 	}
-	__btrfs_remove_free_space_cache(ctl);
+	__btrfs_remove_free_space_cache_locked(ctl);
 	btrfs_discard_update_discardable(block_group);
 	spin_unlock(&ctl->tree_lock);
 
@@ -4005,7 +3998,7 @@ int btrfs_trim_block_group(struct btrfs_block_group *block_group,
 	*trimmed = 0;
 
 	spin_lock(&block_group->lock);
-	if (test_bit(BLOCK_GROUP_FLAG_REMOVED, &block_group->runtime_flags)) {
+	if (block_group->removed) {
 		spin_unlock(&block_group->lock);
 		return 0;
 	}
@@ -4035,7 +4028,7 @@ int btrfs_trim_block_group_extents(struct btrfs_block_group *block_group,
 	*trimmed = 0;
 
 	spin_lock(&block_group->lock);
-	if (test_bit(BLOCK_GROUP_FLAG_REMOVED, &block_group->runtime_flags)) {
+	if (block_group->removed) {
 		spin_unlock(&block_group->lock);
 		return 0;
 	}
@@ -4057,7 +4050,7 @@ int btrfs_trim_block_group_bitmaps(struct btrfs_block_group *block_group,
 	*trimmed = 0;
 
 	spin_lock(&block_group->lock);
-	if (test_bit(BLOCK_GROUP_FLAG_REMOVED, &block_group->runtime_flags)) {
+	if (block_group->removed) {
 		spin_unlock(&block_group->lock);
 		return 0;
 	}

@@ -464,11 +464,7 @@ static void fill_engine_enable_masks(struct intel_gt *gt,
 }
 
 #define LR_HW_CONTEXT_SIZE (80 * sizeof(u32))
-#define XEHP_LR_HW_CONTEXT_SIZE (96 * sizeof(u32))
-#define LR_HW_CONTEXT_SZ(i915) (GRAPHICS_VER_FULL(i915) >= IP_VER(12, 50) ? \
-				    XEHP_LR_HW_CONTEXT_SIZE : \
-				    LR_HW_CONTEXT_SIZE)
-#define LRC_SKIP_SIZE(i915) (LRC_PPHWSP_SZ * PAGE_SIZE + LR_HW_CONTEXT_SZ(i915))
+#define LRC_SKIP_SIZE (LRC_PPHWSP_SZ * PAGE_SIZE + LR_HW_CONTEXT_SIZE)
 static int guc_prep_golden_context(struct intel_guc *guc)
 {
 	struct intel_gt *gt = guc_to_gt(guc);
@@ -529,7 +525,7 @@ static int guc_prep_golden_context(struct intel_guc *guc)
 		 * on all engines).
 		 */
 		ads_blob_write(guc, ads.eng_state_size[guc_class],
-			       real_size - LRC_SKIP_SIZE(gt->i915));
+			       real_size - LRC_SKIP_SIZE);
 		ads_blob_write(guc, ads.golden_context_lrca[guc_class],
 			       addr_ggtt);
 
@@ -603,7 +599,7 @@ static void guc_init_golden_context(struct intel_guc *guc)
 		}
 
 		GEM_BUG_ON(ads_blob_read(guc, ads.eng_state_size[guc_class]) !=
-			   real_size - LRC_SKIP_SIZE(gt->i915));
+			   real_size - LRC_SKIP_SIZE);
 		GEM_BUG_ON(ads_blob_read(guc, ads.golden_context_lrca[guc_class]) != addr_ggtt);
 
 		addr_ggtt += alloc_size;

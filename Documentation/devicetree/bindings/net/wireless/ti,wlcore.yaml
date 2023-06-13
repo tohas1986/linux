@@ -36,6 +36,8 @@ properties:
       This is required when connected via SPI, and optional when connected via
       SDIO.
 
+  spi-max-frequency: true
+
   interrupts:
     minItems: 1
     maxItems: 2
@@ -67,22 +69,20 @@ required:
   - compatible
   - interrupts
 
-allOf:
-  - $ref: /schemas/spi/spi-peripheral-props.yaml#
-  - if:
-      properties:
-        compatible:
-          contains:
-            enum:
-              - ti,wl1271
-              - ti,wl1273
-              - ti,wl1281
-              - ti,wl1283
-    then:
-      required:
-        - ref-clock-frequency
+if:
+  properties:
+    compatible:
+      contains:
+        enum:
+          - ti,wl1271
+          - ti,wl1273
+          - ti,wl1281
+          - ti,wl1283
+then:
+  required:
+    - ref-clock-frequency
 
-unevaluatedProperties: false
+additionalProperties: false
 
 examples:
   - |

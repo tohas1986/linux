@@ -51,11 +51,6 @@ properties:
       - const: timer_sys_ck
     minItems: 1
 
-  power-domains:
-    description:
-      Power domain if available
-    maxItems: 1
-
   interrupts:
     description:
       Interrupt if available. The timer PWM features may be usable
@@ -99,14 +94,12 @@ additionalProperties: false
 
 allOf:
   - if:
-      properties:
-        compatible:
-          contains:
-            const: ti,am654-timer
+      not:
+        properties:
+          compatible:
+            contains:
+              const: ti,am654-timer
     then:
-      required:
-        - power-domains
-    else:
       required:
         - interrupts
 

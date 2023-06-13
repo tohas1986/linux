@@ -5,7 +5,6 @@
 
 .. _process_index:
 
-=============================================
 Working with the kernel development community
 =============================================
 

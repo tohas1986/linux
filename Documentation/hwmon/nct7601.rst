@@ -1,0 +1,35 @@
+Kernel driver nct7601
+=====================
+
+Supported chips:
+
+  * Nuvoton NCT7601
+
+    Prefix: 'nct7601'
+
+    Addresses scanned: I2C 0x28..0x2f
+
+    Datasheet: Available from Nuvoton web site
+
+Authors:
+
+	Konstantin Klubnichkin <kitsok@nebius.com>
+
+Description
+-----------
+
+This driver implements support for the Nuvoton NCT7601 hardware monitoring
+chip. NCT7601 supports 4 temperature sensors.
+
+Tested Boards and BIOS Versions
+-------------------------------
+
+The driver has been reported to work with the following boards and
+BIOS versions.
+
+======================= ===============================================
+Board			BIOS version
+======================= ===============================================
+Kontron COMe-bSC2	CHR2E934.001.GGO
+Kontron COMe-bIP2	CCR2E212
+======================= ===============================================

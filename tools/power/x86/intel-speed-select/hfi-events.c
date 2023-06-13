@@ -181,10 +181,7 @@ struct perf_cap {
 
 static void process_hfi_event(struct perf_cap *perf_cap)
 {
-	struct isst_id id;
-
-	set_isst_id(&id, perf_cap->cpu);
-	process_level_change(&id);
+	process_level_change(perf_cap->cpu);
 }
 
 static int handle_event(struct nl_msg *n, void *arg)

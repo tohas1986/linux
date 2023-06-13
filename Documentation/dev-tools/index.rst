@@ -24,7 +24,6 @@ Documentation/dev-tools/testing-overview.rst
    kcov
    gcov
    kasan
-   kmsan
    ubsan
    kmemleak
    kcsan

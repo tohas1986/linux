@@ -162,8 +162,6 @@ enum {
 	MLX5_SEND_WQE_MAX_WQEBBS	= 16,
 };
 
-#define MLX5_SEND_WQE_MAX_SIZE (MLX5_SEND_WQE_MAX_WQEBBS * MLX5_SEND_WQE_BB)
-
 enum {
 	MLX5_WQE_FMR_PERM_LOCAL_READ	= 1 << 27,
 	MLX5_WQE_FMR_PERM_LOCAL_WRITE	= 1 << 28,
@@ -254,7 +252,6 @@ enum {
 
 enum {
 	MLX5_ETH_WQE_FT_META_IPSEC = BIT(0),
-	MLX5_ETH_WQE_FT_META_MACSEC = BIT(1),
 };
 
 struct mlx5_wqe_eth_seg {
@@ -474,12 +471,6 @@ struct mlx5_mtt {
 
 struct mlx5_klm {
 	__be32		bcount;
-	__be32		key;
-	__be64		va;
-};
-
-struct mlx5_ksm {
-	__be32		reserved;
 	__be32		key;
 	__be64		va;
 };

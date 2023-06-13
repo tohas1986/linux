@@ -71,12 +71,14 @@ static int keywest_attach_adapter(struct i2c_adapter *adapter)
 	return 0;
 }
 
-static void keywest_remove(struct i2c_client *client)
+static int keywest_remove(struct i2c_client *client)
 {
 	if (! keywest_ctx)
-		return;
+		return 0;
 	if (client == keywest_ctx->client)
 		keywest_ctx->client = NULL;
+
+	return 0;
 }
 
 

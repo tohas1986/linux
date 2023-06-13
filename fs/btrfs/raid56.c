@@ -275,6 +275,7 @@ static void merge_rbio(struct btrfs_raid_bio *dest,
 	/* Also inherit the bitmaps from @victim. */
 	bitmap_or(&dest->dbitmap, &victim->dbitmap, &dest->dbitmap,
 		  dest->stripe_nsectors);
+	dest->generic_bio_cnt += victim->generic_bio_cnt;
 	bio_list_init(&victim->bio_list);
 }
 
@@ -813,6 +814,8 @@ static void rbio_orig_end_io(struct btrfs_raid_bio *rbio, blk_status_t err)
 	struct bio *cur = bio_list_get(&rbio->bio_list);
 	struct bio *extra;
 
+	if (rbio->generic_bio_cnt)
+		btrfs_bio_counter_sub(rbio->bioc->fs_info, rbio->generic_bio_cnt);
 	/*
 	 * Clear the data bitmap, as the rbio may be cached for later usage.
 	 * do this before before unlock_stripe() so there will be no new bio
@@ -943,7 +946,6 @@ static struct btrfs_raid_bio *alloc_rbio(struct btrfs_fs_info *fs_info,
 	spin_lock_init(&rbio->bio_list_lock);
 	INIT_LIST_HEAD(&rbio->stripe_cache);
 	INIT_LIST_HEAD(&rbio->hash_list);
-	btrfs_get_bioc(bioc);
 	rbio->bioc = bioc;
 	rbio->nr_pages = num_pages;
 	rbio->nr_sectors = num_sectors;
@@ -1632,8 +1634,10 @@ static int full_stripe_write(struct btrfs_raid_bio *rbio)
 	int ret;
 
 	ret = alloc_rbio_parity_pages(rbio);
-	if (ret)
+	if (ret) {
+		__free_raid_bio(rbio);
 		return ret;
+	}
 
 	ret = lock_stripe_add(rbio);
 	if (ret == 0)
@@ -1809,11 +1813,14 @@ void raid56_parity_write(struct bio *bio, struct btrfs_io_context *bioc)
 
 	rbio = alloc_rbio(fs_info, bioc);
 	if (IS_ERR(rbio)) {
+		btrfs_put_bioc(bioc);
 		ret = PTR_ERR(rbio);
-		goto fail;
+		goto out_dec_counter;
 	}
 	rbio->operation = BTRFS_RBIO_WRITE;
 	rbio_add_bio(rbio, bio);
+
+	rbio->generic_bio_cnt = 1;
 
 	/*
 	 * don't plug on full rbios, just get them out the door
@@ -1821,10 +1828,8 @@ void raid56_parity_write(struct bio *bio, struct btrfs_io_context *bioc)
 	 */
 	if (rbio_is_full(rbio)) {
 		ret = full_stripe_write(rbio);
-		if (ret) {
-			__free_raid_bio(rbio);
-			goto fail;
-		}
+		if (ret)
+			goto out_dec_counter;
 		return;
 	}
 
@@ -1838,15 +1843,14 @@ void raid56_parity_write(struct bio *bio, struct btrfs_io_context *bioc)
 		list_add_tail(&rbio->plug_list, &plug->rbio_list);
 	} else {
 		ret = __raid56_parity_write(rbio);
-		if (ret) {
-			__free_raid_bio(rbio);
-			goto fail;
-		}
+		if (ret)
+			goto out_dec_counter;
 	}
 
 	return;
 
-fail:
+out_dec_counter:
+	btrfs_bio_counter_dec(fs_info);
 	bio->bi_status = errno_to_blk_status(ret);
 	bio_endio(bio);
 }
@@ -2194,10 +2198,17 @@ cleanup:
  * of the drive.
  */
 void raid56_parity_recover(struct bio *bio, struct btrfs_io_context *bioc,
-			   int mirror_num)
+			   int mirror_num, bool generic_io)
 {
 	struct btrfs_fs_info *fs_info = bioc->fs_info;
 	struct btrfs_raid_bio *rbio;
+
+	if (generic_io) {
+		ASSERT(bioc->mirror_num == mirror_num);
+		btrfs_bio(bio)->mirror_num = mirror_num;
+	} else {
+		btrfs_get_bioc(bioc);
+	}
 
 	rbio = alloc_rbio(fs_info, bioc);
 	if (IS_ERR(rbio)) {
@@ -2214,10 +2225,13 @@ void raid56_parity_recover(struct bio *bio, struct btrfs_io_context *bioc,
 "%s could not find the bad stripe in raid56 so that we cannot recover any more (bio has logical %llu len %llu, bioc has map_type %llu)",
 			   __func__, bio->bi_iter.bi_sector << 9,
 			   (u64)bio->bi_iter.bi_size, bioc->map_type);
-		__free_raid_bio(rbio);
+		kfree(rbio);
 		bio->bi_status = BLK_STS_IOERR;
 		goto out_end_bio;
 	}
+
+	if (generic_io)
+		rbio->generic_bio_cnt = 1;
 
 	/*
 	 * Loop retry:
@@ -2247,6 +2261,8 @@ void raid56_parity_recover(struct bio *bio, struct btrfs_io_context *bioc,
 	return;
 
 out_end_bio:
+	btrfs_bio_counter_dec(fs_info);
+	btrfs_put_bioc(bioc);
 	bio_endio(bio);
 }
 
@@ -2310,6 +2326,13 @@ struct btrfs_raid_bio *raid56_parity_alloc_scrub_rbio(struct bio *bio,
 	ASSERT(i < rbio->real_stripes);
 
 	bitmap_copy(&rbio->dbitmap, dbitmap, stripe_nsectors);
+
+	/*
+	 * We have already increased bio_counter when getting bioc, record it
+	 * so we can free it at rbio_orig_end_io().
+	 */
+	rbio->generic_bio_cnt = 1;
+
 	return rbio;
 }
 
@@ -2750,6 +2773,12 @@ raid56_alloc_missing_rbio(struct bio *bio, struct btrfs_io_context *bioc)
 		__free_raid_bio(rbio);
 		return NULL;
 	}
+
+	/*
+	 * When we get bioc, we have already increased bio_counter, record it
+	 * so we can free it at rbio_orig_end_io()
+	 */
+	rbio->generic_bio_cnt = 1;
 
 	return rbio;
 }

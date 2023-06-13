@@ -2,7 +2,7 @@
 #include <errno.h>
 #include <inttypes.h>
 /* For the CPU_* macros */
-#include <sched.h>
+#include <pthread.h>
 
 #include <sys/types.h>
 #include <sys/stat.h>

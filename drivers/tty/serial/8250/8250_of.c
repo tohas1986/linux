@@ -15,6 +15,7 @@
 #include <linux/pm_runtime.h>
 #include <linux/clk.h>
 #include <linux/reset.h>
+#include <linux/workqueue.h>
 
 #include "8250.h"
 
@@ -23,6 +24,9 @@ struct of_serial_info {
 	struct reset_control *rst;
 	int type;
 	int line;
+	struct workqueue_struct *work_queue;
+	struct delayed_work work_handler;
+	void __iomem *wa_base;
 };
 
 /*
@@ -191,6 +195,18 @@ err_pmruntime:
 	return ret;
 }
 
+#define WA_DELAY_JIFFIES	msecs_to_jiffies(1)
+static void clear_abnormal_int_flags(struct work_struct *work)
+{
+	struct delayed_work *dwork = to_delayed_work(work);
+	struct of_serial_info *info = container_of(dwork, struct of_serial_info,
+						   work_handler);
+
+	(void) readl(info->wa_base);
+	queue_delayed_work(info->work_queue, &info->work_handler,
+			   WA_DELAY_JIFFIES);
+}
+
 /*
  * Try to register a serial port
  */
@@ -243,6 +259,47 @@ static int of_platform_serial_probe(struct platform_device *ofdev)
 	if (ret < 0)
 		goto err_dispose;
 
+	if (of_device_is_compatible(ofdev->dev.of_node,
+				    "aspeed,ast2600-uart")) {
+		#define REV_ID_AST2600A0 0x05000303
+		void __iomem *chip_id_base;
+		struct resource *res = platform_get_resource(ofdev,
+							     IORESOURCE_MEM, 1);
+
+		if (!res || resource_size(res) < 2)
+			goto skip_wa;
+
+		info->wa_base = devm_platform_ioremap_resource(ofdev, 2);
+		if (IS_ERR(info->wa_base))
+			goto skip_wa;
+
+		chip_id_base = devm_ioremap_resource(&ofdev->dev, res);
+		if (IS_ERR(chip_id_base))
+			goto skip_wa;
+
+		if (readl(chip_id_base) == REV_ID_AST2600A0) {
+			info->work_queue = alloc_ordered_workqueue(ofdev->name,
+								   0);
+			if (info->work_queue) {
+				INIT_DELAYED_WORK(&info->work_handler,
+						  clear_abnormal_int_flags);
+				queue_delayed_work(info->work_queue,
+						   &info->work_handler,
+						   WA_DELAY_JIFFIES);
+				dev_info(&ofdev->dev,
+					 "AST2600 A0 WA initiated\n");
+			} else {
+				dev_err(&ofdev->dev,
+					"Can't enable AST2600 A0 UART WA\n");
+			}
+		}
+
+		devm_iounmap(&ofdev->dev, chip_id_base);
+		devm_release_mem_region(&ofdev->dev, res->start,
+					resource_size(res));
+	}
+
+skip_wa:
 	info->type = port_type;
 	info->line = ret;
 	platform_set_drvdata(ofdev, info);
@@ -263,6 +320,11 @@ err_free:
 static int of_platform_serial_remove(struct platform_device *ofdev)
 {
 	struct of_serial_info *info = platform_get_drvdata(ofdev);
+
+	if (info->work_queue) {
+		cancel_delayed_work_sync(&info->work_handler);
+		destroy_workqueue(info->work_queue);
+	}
 
 	serial8250_unregister_port(info->line);
 
@@ -336,6 +398,7 @@ static const struct of_device_id of_platform_serial_table[] = {
 	{ .compatible = "ti,da830-uart", .data = (void *)PORT_DA830, },
 	{ .compatible = "nuvoton,wpcm450-uart", .data = (void *)PORT_NPCM, },
 	{ .compatible = "nuvoton,npcm750-uart", .data = (void *)PORT_NPCM, },
+	{ .compatible = "aspeed,ast2600-uart", .data = (void *)PORT_16550A, },
 	{ /* end of list */ },
 };
 MODULE_DEVICE_TABLE(of, of_platform_serial_table);

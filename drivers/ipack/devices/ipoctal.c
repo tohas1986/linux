@@ -497,7 +497,7 @@ static unsigned int ipoctal_chars_in_buffer(struct tty_struct *tty)
 }
 
 static void ipoctal_set_termios(struct tty_struct *tty,
-				const struct ktermios *old_termios)
+				struct ktermios *old_termios)
 {
 	unsigned int cflag;
 	unsigned char mr1 = 0;

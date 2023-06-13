@@ -241,7 +241,7 @@ static int max1619_detect(struct i2c_client *client,
 		return -ENODEV;
 	}
 
-	strscpy(info->type, "max1619", I2C_NAME_SIZE);
+	strlcpy(info->type, "max1619", I2C_NAME_SIZE);
 
 	return 0;
 }

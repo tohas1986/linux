@@ -1359,6 +1359,7 @@ static int mv_udc_start(struct usb_gadget *gadget,
 	spin_lock_irqsave(&udc->lock, flags);
 
 	/* hook up the driver ... */
+	driver->driver.bus = NULL;
 	udc->driver = driver;
 
 	udc->usb_state = USB_STATE_ATTACHED;

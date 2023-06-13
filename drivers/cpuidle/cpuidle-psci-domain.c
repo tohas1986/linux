@@ -124,8 +124,10 @@ static bool psci_pd_try_set_osi_mode(void)
 		return false;
 
 	ret = psci_set_osi_mode(true);
-	if (ret)
+	if (ret) {
+		pr_warn("failed to enable OSI mode: %d\n", ret);
 		return false;
+	}
 
 	return true;
 }

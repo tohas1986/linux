@@ -32,6 +32,8 @@ void vp_legacy_set_queue_address(struct virtio_pci_legacy_device *ldev,
 			     u16 index, u32 queue_pfn);
 bool vp_legacy_get_queue_enable(struct virtio_pci_legacy_device *ldev,
 				u16 idx);
+void vp_legacy_set_queue_size(struct virtio_pci_legacy_device *ldev,
+			      u16 idx, u16 size);
 u16 vp_legacy_get_queue_size(struct virtio_pci_legacy_device *ldev,
 			     u16 idx);
 int vp_legacy_probe(struct virtio_pci_legacy_device *ldev);

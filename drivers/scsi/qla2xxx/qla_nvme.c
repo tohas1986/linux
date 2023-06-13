@@ -684,8 +684,12 @@ static void qla_nvme_map_queues(struct nvme_fc_local_port *lport,
 		struct blk_mq_queue_map *map)
 {
 	struct scsi_qla_host *vha = lport->private;
+	int rc;
 
-	blk_mq_pci_map_queues(map, vha->hw->pdev, vha->irq_offset);
+	rc = blk_mq_pci_map_queues(map, vha->hw->pdev, vha->irq_offset);
+	if (rc)
+		ql_log(ql_log_warn, vha, 0x21de,
+		       "pci map queue failed 0x%x", rc);
 }
 
 static void qla_nvme_localport_delete(struct nvme_fc_local_port *lport)

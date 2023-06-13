@@ -28,6 +28,7 @@
 #include <sys/types.h>
 #include <sys/prctl.h>
 #include <semaphore.h>
+#include <pthread.h>
 #include <math.h>
 #include <limits.h>
 
@@ -56,9 +57,6 @@ static bool combine_locks;
 static bool show_thread_stats;
 static bool use_bpf;
 static unsigned long bpf_map_entries = 10240;
-static int max_stack_depth = CONTENTION_STACK_DEPTH;
-static int stack_skip = CONTENTION_STACK_SKIP;
-static int print_nr_entries = INT_MAX / 2;
 
 static enum {
 	LOCK_AGGR_ADDR,
@@ -563,35 +561,6 @@ enum acquire_flags {
 	READ_LOCK = 2,
 };
 
-static int get_key_by_aggr_mode_simple(u64 *key, u64 addr, u32 tid)
-{
-	switch (aggr_mode) {
-	case LOCK_AGGR_ADDR:
-		*key = addr;
-		break;
-	case LOCK_AGGR_TASK:
-		*key = tid;
-		break;
-	case LOCK_AGGR_CALLER:
-	default:
-		pr_err("Invalid aggregation mode: %d\n", aggr_mode);
-		return -EINVAL;
-	}
-	return 0;
-}
-
-static u64 callchain_id(struct evsel *evsel, struct perf_sample *sample);
-
-static int get_key_by_aggr_mode(u64 *key, u64 addr, struct evsel *evsel,
-				 struct perf_sample *sample)
-{
-	if (aggr_mode == LOCK_AGGR_CALLER) {
-		*key = callchain_id(evsel, sample);
-		return 0;
-	}
-	return get_key_by_aggr_mode_simple(key, addr, sample->tid);
-}
-
 static int report_lock_acquire_event(struct evsel *evsel,
 				     struct perf_sample *sample)
 {
@@ -602,11 +571,19 @@ static int report_lock_acquire_event(struct evsel *evsel,
 	u64 addr = evsel__intval(evsel, sample, "lockdep_addr");
 	int flag = evsel__intval(evsel, sample, "flags");
 	u64 key;
-	int ret;
 
-	ret = get_key_by_aggr_mode_simple(&key, addr, sample->tid);
-	if (ret < 0)
-		return ret;
+	switch (aggr_mode) {
+	case LOCK_AGGR_ADDR:
+		key = addr;
+		break;
+	case LOCK_AGGR_TASK:
+		key = sample->tid;
+		break;
+	case LOCK_AGGR_CALLER:
+	default:
+		pr_err("Invalid aggregation mode: %d\n", aggr_mode);
+		return -EINVAL;
+	}
 
 	ls = lock_stat_findnew(key, name, 0);
 	if (!ls)
@@ -677,11 +654,19 @@ static int report_lock_acquired_event(struct evsel *evsel,
 	const char *name = evsel__strval(evsel, sample, "name");
 	u64 addr = evsel__intval(evsel, sample, "lockdep_addr");
 	u64 key;
-	int ret;
 
-	ret = get_key_by_aggr_mode_simple(&key, addr, sample->tid);
-	if (ret < 0)
-		return ret;
+	switch (aggr_mode) {
+	case LOCK_AGGR_ADDR:
+		key = addr;
+		break;
+	case LOCK_AGGR_TASK:
+		key = sample->tid;
+		break;
+	case LOCK_AGGR_CALLER:
+	default:
+		pr_err("Invalid aggregation mode: %d\n", aggr_mode);
+		return -EINVAL;
+	}
 
 	ls = lock_stat_findnew(key, name, 0);
 	if (!ls)
@@ -742,11 +727,19 @@ static int report_lock_contended_event(struct evsel *evsel,
 	const char *name = evsel__strval(evsel, sample, "name");
 	u64 addr = evsel__intval(evsel, sample, "lockdep_addr");
 	u64 key;
-	int ret;
 
-	ret = get_key_by_aggr_mode_simple(&key, addr, sample->tid);
-	if (ret < 0)
-		return ret;
+	switch (aggr_mode) {
+	case LOCK_AGGR_ADDR:
+		key = addr;
+		break;
+	case LOCK_AGGR_TASK:
+		key = sample->tid;
+		break;
+	case LOCK_AGGR_CALLER:
+	default:
+		pr_err("Invalid aggregation mode: %d\n", aggr_mode);
+		return -EINVAL;
+	}
 
 	ls = lock_stat_findnew(key, name, 0);
 	if (!ls)
@@ -800,11 +793,19 @@ static int report_lock_release_event(struct evsel *evsel,
 	const char *name = evsel__strval(evsel, sample, "name");
 	u64 addr = evsel__intval(evsel, sample, "lockdep_addr");
 	u64 key;
-	int ret;
 
-	ret = get_key_by_aggr_mode_simple(&key, addr, sample->tid);
-	if (ret < 0)
-		return ret;
+	switch (aggr_mode) {
+	case LOCK_AGGR_ADDR:
+		key = addr;
+		break;
+	case LOCK_AGGR_TASK:
+		key = sample->tid;
+		break;
+	case LOCK_AGGR_CALLER:
+	default:
+		pr_err("Invalid aggregation mode: %d\n", aggr_mode);
+		return -EINVAL;
+	}
 
 	ls = lock_stat_findnew(key, name, 0);
 	if (!ls)
@@ -902,23 +903,6 @@ bool is_lock_function(struct machine *machine, u64 addr)
 	return false;
 }
 
-static int get_symbol_name_offset(struct map *map, struct symbol *sym, u64 ip,
-				  char *buf, int size)
-{
-	u64 offset;
-
-	if (map == NULL || sym == NULL) {
-		buf[0] = '\0';
-		return 0;
-	}
-
-	offset = map->map_ip(map, ip) - sym->start;
-
-	if (offset)
-		return scnprintf(buf, size, "%s+%#lx", sym->name, offset);
-	else
-		return strlcpy(buf, sym->name, size);
-}
 static int lock_contention_caller(struct evsel *evsel, struct perf_sample *sample,
 				  char *buf, int size)
 {
@@ -939,7 +923,7 @@ static int lock_contention_caller(struct evsel *evsel, struct perf_sample *sampl
 
 	/* use caller function name from the callchain */
 	ret = thread__resolve_callchain(thread, cursor, evsel, sample,
-					NULL, NULL, max_stack_depth);
+					NULL, NULL, CONTENTION_STACK_DEPTH);
 	if (ret != 0) {
 		thread__put(thread);
 		return -1;
@@ -956,13 +940,20 @@ static int lock_contention_caller(struct evsel *evsel, struct perf_sample *sampl
 			break;
 
 		/* skip first few entries - for lock functions */
-		if (++skip <= stack_skip)
+		if (++skip <= CONTENTION_STACK_SKIP)
 			goto next;
 
 		sym = node->ms.sym;
 		if (sym && !is_lock_function(machine, node->ip)) {
-			get_symbol_name_offset(node->ms.map, sym, node->ip,
-					       buf, size);
+			struct map *map = node->ms.map;
+			u64 offset;
+
+			offset = map->map_ip(map, node->ip) - sym->start;
+
+			if (offset)
+				scnprintf(buf, size, "%s+%#lx", sym->name, offset);
+			else
+				strlcpy(buf, sym->name, size);
 			return 0;
 		}
 
@@ -987,7 +978,7 @@ static u64 callchain_id(struct evsel *evsel, struct perf_sample *sample)
 
 	/* use caller function name from the callchain */
 	ret = thread__resolve_callchain(thread, cursor, evsel, sample,
-					NULL, NULL, max_stack_depth);
+					NULL, NULL, CONTENTION_STACK_DEPTH);
 	thread__put(thread);
 
 	if (ret != 0)
@@ -1003,7 +994,7 @@ static u64 callchain_id(struct evsel *evsel, struct perf_sample *sample)
 			break;
 
 		/* skip first few entries - for lock functions */
-		if (++skip <= stack_skip)
+		if (++skip <= CONTENTION_STACK_SKIP)
 			goto next;
 
 		if (node->ms.sym && is_lock_function(machine, node->ip))
@@ -1017,27 +1008,6 @@ next:
 	return hash;
 }
 
-static u64 *get_callstack(struct perf_sample *sample, int max_stack)
-{
-	u64 *callstack;
-	u64 i;
-	int c;
-
-	callstack = calloc(max_stack, sizeof(*callstack));
-	if (callstack == NULL)
-		return NULL;
-
-	for (i = 0, c = 0; i < sample->callchain->nr && c < max_stack; i++) {
-		u64 ip = sample->callchain->ips[i];
-
-		if (ip >= PERF_CONTEXT_MAX)
-			continue;
-
-		callstack[c++] = ip;
-	}
-	return callstack;
-}
-
 static int report_lock_contention_begin_event(struct evsel *evsel,
 					      struct perf_sample *sample)
 {
@@ -1046,11 +1016,21 @@ static int report_lock_contention_begin_event(struct evsel *evsel,
 	struct lock_seq_stat *seq;
 	u64 addr = evsel__intval(evsel, sample, "lock_addr");
 	u64 key;
-	int ret;
 
-	ret = get_key_by_aggr_mode(&key, addr, evsel, sample);
-	if (ret < 0)
-		return ret;
+	switch (aggr_mode) {
+	case LOCK_AGGR_ADDR:
+		key = addr;
+		break;
+	case LOCK_AGGR_TASK:
+		key = sample->tid;
+		break;
+	case LOCK_AGGR_CALLER:
+		key = callchain_id(evsel, sample);
+		break;
+	default:
+		pr_err("Invalid aggregation mode: %d\n", aggr_mode);
+		return -EINVAL;
+	}
 
 	ls = lock_stat_find(key);
 	if (!ls) {
@@ -1064,12 +1044,6 @@ static int report_lock_contention_begin_event(struct evsel *evsel,
 		ls = lock_stat_findnew(key, caller, flags);
 		if (!ls)
 			return -ENOMEM;
-
-		if (aggr_mode == LOCK_AGGR_CALLER && verbose) {
-			ls->callstack = get_callstack(sample, max_stack_depth);
-			if (ls->callstack == NULL)
-				return -ENOMEM;
-		}
 	}
 
 	ts = thread_stat_findnew(sample->tid);
@@ -1125,11 +1099,21 @@ static int report_lock_contention_end_event(struct evsel *evsel,
 	u64 contended_term;
 	u64 addr = evsel__intval(evsel, sample, "lock_addr");
 	u64 key;
-	int ret;
 
-	ret = get_key_by_aggr_mode(&key, addr, evsel, sample);
-	if (ret < 0)
-		return ret;
+	switch (aggr_mode) {
+	case LOCK_AGGR_ADDR:
+		key = addr;
+		break;
+	case LOCK_AGGR_TASK:
+		key = sample->tid;
+		break;
+	case LOCK_AGGR_CALLER:
+		key = callchain_id(evsel, sample);
+		break;
+	default:
+		pr_err("Invalid aggregation mode: %d\n", aggr_mode);
+		return -EINVAL;
+	}
 
 	ls = lock_stat_find(key);
 	if (!ls)
@@ -1250,7 +1234,7 @@ static void print_bad_events(int bad, int total)
 	for (i = 0; i < BROKEN_MAX; i++)
 		broken += bad_hist[i];
 
-	if (quiet || (broken == 0 && !verbose))
+	if (broken == 0 && !verbose)
 		return;
 
 	pr_info("\n=== output for debug===\n\n");
@@ -1267,16 +1251,14 @@ static void print_result(void)
 	struct lock_stat *st;
 	struct lock_key *key;
 	char cut_name[20];
-	int bad, total, printed;
+	int bad, total;
 
-	if (!quiet) {
-		pr_info("%20s ", "Name");
-		list_for_each_entry(key, &lock_keys, list)
-			pr_info("%*s ", key->len, key->header);
-		pr_info("\n\n");
-	}
+	pr_info("%20s ", "Name");
+	list_for_each_entry(key, &lock_keys, list)
+		pr_info("%*s ", key->len, key->header);
+	pr_info("\n\n");
 
-	bad = total = printed = 0;
+	bad = total = 0;
 	while ((st = pop_from_result())) {
 		total++;
 		if (st->broken)
@@ -1314,9 +1296,6 @@ static void print_result(void)
 			pr_info(" ");
 		}
 		pr_info("\n");
-
-		if (++printed >= print_nr_entries)
-			break;
 	}
 
 	print_bad_events(bad, total);
@@ -1478,23 +1457,21 @@ static void sort_contention_result(void)
 	sort_result();
 }
 
-static void print_contention_result(struct lock_contention *con)
+static void print_contention_result(void)
 {
 	struct lock_stat *st;
 	struct lock_key *key;
-	int bad, total, printed;
+	int bad, total;
 
-	if (!quiet) {
-		list_for_each_entry(key, &lock_keys, list)
-			pr_info("%*s ", key->len, key->header);
+	list_for_each_entry(key, &lock_keys, list)
+		pr_info("%*s ", key->len, key->header);
 
-		if (show_thread_stats)
-			pr_info("  %10s   %s\n\n", "pid", "comm");
-		else
-			pr_info("  %10s   %s\n\n", "type", "caller");
-	}
+	if (show_thread_stats)
+		pr_info("  %10s   %s\n\n", "pid", "comm");
+	else
+		pr_info("  %10s   %s\n\n", "type", "caller");
 
-	bad = total = printed = 0;
+	bad = total = 0;
 	if (use_bpf)
 		bad = bad_hist[BROKEN_CONTENDED];
 
@@ -1515,30 +1492,10 @@ static void print_contention_result(struct lock_contention *con)
 			/* st->addr contains tid of thread */
 			t = perf_session__findnew(session, pid);
 			pr_info("  %10d   %s\n", pid, thread__comm_str(t));
-			goto next;
+			continue;
 		}
 
 		pr_info("  %10s   %s\n", get_type_str(st), st->name);
-		if (verbose) {
-			struct map *kmap;
-			struct symbol *sym;
-			char buf[128];
-			u64 ip;
-
-			for (int i = 0; i < max_stack_depth; i++) {
-				if (!st->callstack || !st->callstack[i])
-					break;
-
-				ip = st->callstack[i];
-				sym = machine__find_kernel_symbol(con->machine, ip, &kmap);
-				get_symbol_name_offset(kmap, sym, ip, buf, sizeof(buf));
-				pr_info("\t\t\t%#lx  %s\n", (unsigned long)ip, buf);
-			}
-		}
-
-next:
-		if (++printed >= print_nr_entries)
-			break;
 	}
 
 	print_bad_events(bad, total);
@@ -1582,7 +1539,6 @@ static int __cmd_report(bool display_info)
 
 	/* for lock function check */
 	symbol_conf.sort_by_name = true;
-	symbol_conf.allow_aliases = true;
 	symbol__init(&session->header.env);
 
 	if (!perf_session__has_traces(session, "lock record"))
@@ -1647,8 +1603,6 @@ static int __cmd_contention(int argc, const char **argv)
 		.target = &target,
 		.result = &lockhash_table[0],
 		.map_nr_entries = bpf_map_entries,
-		.max_stack = max_stack_depth,
-		.stack_skip = stack_skip,
 	};
 
 	session = perf_session__new(use_bpf ? NULL : &data, &eops);
@@ -1657,11 +1611,8 @@ static int __cmd_contention(int argc, const char **argv)
 		return PTR_ERR(session);
 	}
 
-	con.machine = &session->machines.host;
-
 	/* for lock function check */
 	symbol_conf.sort_by_name = true;
-	symbol_conf.allow_aliases = true;
 	symbol__init(&session->header.env);
 
 	if (use_bpf) {
@@ -1677,6 +1628,8 @@ static int __cmd_contention(int argc, const char **argv)
 		signal(SIGINT, sighandler);
 		signal(SIGCHLD, sighandler);
 		signal(SIGTERM, sighandler);
+
+		con.machine = &session->machines.host;
 
 		con.evlist = evlist__new();
 		if (con.evlist == NULL) {
@@ -1749,7 +1702,7 @@ static int __cmd_contention(int argc, const char **argv)
 	setup_pager();
 
 	sort_contention_result();
-	print_contention_result(&con);
+	print_contention_result();
 
 out_delete:
 	evlist__delete(con.evlist);
@@ -1871,7 +1824,6 @@ int cmd_lock(int argc, const char **argv)
 		   "file", "vmlinux pathname"),
 	OPT_STRING(0, "kallsyms", &symbol_conf.kallsyms_name,
 		   "file", "kallsyms pathname"),
-	OPT_BOOLEAN('q', "quiet", &quiet, "Do not show any warnings or messages"),
 	OPT_END()
 	};
 
@@ -1893,7 +1845,6 @@ int cmd_lock(int argc, const char **argv)
 		    "combine locks in the same class"),
 	OPT_BOOLEAN('t', "threads", &show_thread_stats,
 		    "show per-thread lock stats"),
-	OPT_INTEGER('E', "entries", &print_nr_entries, "display this many functions"),
 	OPT_PARENT(lock_options)
 	};
 
@@ -1915,13 +1866,6 @@ int cmd_lock(int argc, const char **argv)
 		   "Trace on existing thread id (exclusive to --pid)"),
 	OPT_CALLBACK(0, "map-nr-entries", &bpf_map_entries, "num",
 		     "Max number of BPF map entries", parse_map_entry),
-	OPT_INTEGER(0, "max-stack", &max_stack_depth,
-		    "Set the maximum stack depth when collecting lock contention, "
-		    "Default: " __stringify(CONTENTION_STACK_DEPTH)),
-	OPT_INTEGER(0, "stack-skip", &stack_skip,
-		    "Set the number of stack depth to skip when finding a lock caller, "
-		    "Default: " __stringify(CONTENTION_STACK_SKIP)),
-	OPT_INTEGER('E', "entries", &print_nr_entries, "display this many functions"),
 	OPT_PARENT(lock_options)
 	};
 

@@ -4,7 +4,7 @@
 $id: http://devicetree.org/schemas/arm/altera.yaml#
 $schema: http://devicetree.org/meta-schemas/core.yaml#
 
-title: Altera's SoCFPGA platform
+title: Altera's SoCFPGA platform device tree bindings
 
 maintainers:
   - Dinh Nguyen <dinguyen@kernel.org>

@@ -3373,8 +3373,9 @@ static int dpaa2_switch_probe(struct fsl_mc_device *sw_dev)
 	 * different queues for each switch ports.
 	 */
 	for (i = 0; i < DPAA2_SWITCH_RX_NUM_FQS; i++)
-		netif_napi_add(ethsw->ports[0]->netdev, &ethsw->fq[i].napi,
-			       dpaa2_switch_poll);
+		netif_napi_add(ethsw->ports[0]->netdev,
+			       &ethsw->fq[i].napi, dpaa2_switch_poll,
+			       NAPI_POLL_WEIGHT);
 
 	/* Setup IRQs */
 	err = dpaa2_switch_setup_irqs(sw_dev);

@@ -90,8 +90,6 @@ enum hp_wmi_event_ids {
 	HPWMI_PEAKSHIFT_PERIOD		= 0x0F,
 	HPWMI_BATTERY_CHARGE_PERIOD	= 0x10,
 	HPWMI_SANITIZATION_MODE		= 0x17,
-	HPWMI_OMEN_KEY			= 0x1D,
-	HPWMI_SMART_EXPERIENCE_APP	= 0x21,
 };
 
 /*
@@ -209,19 +207,15 @@ struct bios_rfkill2_state {
 };
 
 static const struct key_entry hp_wmi_keymap[] = {
-	{ KE_KEY, 0x02,    { KEY_BRIGHTNESSUP } },
-	{ KE_KEY, 0x03,    { KEY_BRIGHTNESSDOWN } },
-	{ KE_KEY, 0x20e6,  { KEY_PROG1 } },
-	{ KE_KEY, 0x20e8,  { KEY_MEDIA } },
-	{ KE_KEY, 0x2142,  { KEY_MEDIA } },
-	{ KE_KEY, 0x213b,  { KEY_INFO } },
-	{ KE_KEY, 0x2169,  { KEY_ROTATE_DISPLAY } },
-	{ KE_KEY, 0x216a,  { KEY_SETUP } },
-	{ KE_KEY, 0x21a5,  { KEY_PROG2 } }, /* HP Omen Key */
-	{ KE_KEY, 0x21a7,  { KEY_FN_ESC } },
-	{ KE_KEY, 0x21a9,  { KEY_TOUCHPAD_OFF } },
-	{ KE_KEY, 0x121a9, { KEY_TOUCHPAD_ON } },
-	{ KE_KEY, 0x231b,  { KEY_HELP } },
+	{ KE_KEY, 0x02,   { KEY_BRIGHTNESSUP } },
+	{ KE_KEY, 0x03,   { KEY_BRIGHTNESSDOWN } },
+	{ KE_KEY, 0x20e6, { KEY_PROG1 } },
+	{ KE_KEY, 0x20e8, { KEY_MEDIA } },
+	{ KE_KEY, 0x2142, { KEY_MEDIA } },
+	{ KE_KEY, 0x213b, { KEY_INFO } },
+	{ KE_KEY, 0x2169, { KEY_ROTATE_DISPLAY } },
+	{ KE_KEY, 0x216a, { KEY_SETUP } },
+	{ KE_KEY, 0x231b, { KEY_HELP } },
 	{ KE_END, 0 }
 };
 
@@ -813,7 +807,6 @@ static void hp_wmi_notify(u32 value, void *context)
 	case HPWMI_SMART_ADAPTER:
 		break;
 	case HPWMI_BEZEL_BUTTON:
-	case HPWMI_OMEN_KEY:
 		key_code = hp_wmi_read_int(HPWMI_HOTKEY_QUERY);
 		if (key_code < 0)
 			break;
@@ -863,8 +856,6 @@ static void hp_wmi_notify(u32 value, void *context)
 	case HPWMI_BATTERY_CHARGE_PERIOD:
 		break;
 	case HPWMI_SANITIZATION_MODE:
-		break;
-	case HPWMI_SMART_EXPERIENCE_APP:
 		break;
 	default:
 		pr_info("Unknown event_id - %d - 0x%x\n", event_id, event_data);
@@ -1534,7 +1525,7 @@ static int __init hp_wmi_init(void)
 
 	if (bios_capable) {
 		hp_wmi_platform_dev =
-			platform_device_register_simple("hp-wmi", PLATFORM_DEVID_NONE, NULL, 0);
+			platform_device_register_simple("hp-wmi", -1, NULL, 0);
 		if (IS_ERR(hp_wmi_platform_dev)) {
 			err = PTR_ERR(hp_wmi_platform_dev);
 			goto err_destroy_input;

@@ -58,6 +58,9 @@ enum nl802154_commands {
 
 	NL802154_CMD_SET_WPAN_PHY_NETNS,
 
+	/* add new commands above here */
+
+#ifdef CONFIG_IEEE802154_NL802154_EXPERIMENTAL
 	NL802154_CMD_SET_SEC_PARAMS,
 	NL802154_CMD_GET_SEC_KEY,		/* can dump */
 	NL802154_CMD_NEW_SEC_KEY,
@@ -71,8 +74,7 @@ enum nl802154_commands {
 	NL802154_CMD_GET_SEC_LEVEL,		/* can dump */
 	NL802154_CMD_NEW_SEC_LEVEL,
 	NL802154_CMD_DEL_SEC_LEVEL,
-
-	/* add new commands above here */
+#endif /* CONFIG_IEEE802154_NL802154_EXPERIMENTAL */
 
 	/* used to define NL802154_CMD_MAX below */
 	__NL802154_CMD_AFTER_LAST,

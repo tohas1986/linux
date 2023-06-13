@@ -42,9 +42,11 @@ properties:
     maxItems: 1
 
   interconnects:
+    minItems: 6
     maxItems: 6
 
   interconnect-names:
+    minItems: 6
     maxItems: 6
 
   operating-points-v2:

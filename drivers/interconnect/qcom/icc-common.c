@@ -5,7 +5,6 @@
 
 #include <linux/of.h>
 #include <linux/slab.h>
-#include <linux/module.h>
 
 #include "icc-common.h"
 
@@ -33,5 +32,3 @@ struct icc_node_data *qcom_icc_xlate_extended(struct of_phandle_args *spec, void
 	return ndata;
 }
 EXPORT_SYMBOL_GPL(qcom_icc_xlate_extended);
-
-MODULE_LICENSE("GPL");

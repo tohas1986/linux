@@ -401,7 +401,7 @@ static int pre_rsb_struct(struct dlm_ls *ls)
    unlock any spinlocks, go back and call pre_rsb_struct again.
    Otherwise, take an rsb off the list and return it. */
 
-static int get_rsb_struct(struct dlm_ls *ls, const void *name, int len,
+static int get_rsb_struct(struct dlm_ls *ls, char *name, int len,
 			  struct dlm_rsb **r_ret)
 {
 	struct dlm_rsb *r;
@@ -412,8 +412,7 @@ static int get_rsb_struct(struct dlm_ls *ls, const void *name, int len,
 		count = ls->ls_new_rsb_count;
 		spin_unlock(&ls->ls_new_rsb_spin);
 		log_debug(ls, "find_rsb retry %d %d %s",
-			  count, dlm_config.ci_new_rsb_count,
-			  (const char *)name);
+			  count, dlm_config.ci_new_rsb_count, name);
 		return -EAGAIN;
 	}
 
@@ -449,7 +448,7 @@ static int rsb_cmp(struct dlm_rsb *r, const char *name, int nlen)
 	return memcmp(r->res_name, maxname, DLM_RESNAME_MAXLEN);
 }
 
-int dlm_search_rsb_tree(struct rb_root *tree, const void *name, int len,
+int dlm_search_rsb_tree(struct rb_root *tree, char *name, int len,
 			struct dlm_rsb **r_ret)
 {
 	struct rb_node *node = tree->rb_node;
@@ -547,7 +546,7 @@ static int rsb_insert(struct dlm_rsb *rsb, struct rb_root *tree)
  * while that rsb has a potentially stale master.)
  */
 
-static int find_rsb_dir(struct dlm_ls *ls, const void *name, int len,
+static int find_rsb_dir(struct dlm_ls *ls, char *name, int len,
 			uint32_t hash, uint32_t b,
 			int dir_nodeid, int from_nodeid,
 			unsigned int flags, struct dlm_rsb **r_ret)
@@ -725,7 +724,7 @@ static int find_rsb_dir(struct dlm_ls *ls, const void *name, int len,
    dlm_recover_locks) before we've made ourself master (in
    dlm_recover_masters). */
 
-static int find_rsb_nodir(struct dlm_ls *ls, const void *name, int len,
+static int find_rsb_nodir(struct dlm_ls *ls, char *name, int len,
 			  uint32_t hash, uint32_t b,
 			  int dir_nodeid, int from_nodeid,
 			  unsigned int flags, struct dlm_rsb **r_ret)
@@ -819,9 +818,8 @@ static int find_rsb_nodir(struct dlm_ls *ls, const void *name, int len,
 	return error;
 }
 
-static int find_rsb(struct dlm_ls *ls, const void *name, int len,
-		    int from_nodeid, unsigned int flags,
-		    struct dlm_rsb **r_ret)
+static int find_rsb(struct dlm_ls *ls, char *name, int len, int from_nodeid,
+		    unsigned int flags, struct dlm_rsb **r_ret)
 {
 	uint32_t hash, b;
 	int dir_nodeid;
@@ -2902,25 +2900,11 @@ static int validate_lock_args(struct dlm_ls *ls, struct dlm_lkb *lkb,
 #endif
 	rv = 0;
  out:
-	switch (rv) {
-	case 0:
-		break;
-	case -EINVAL:
-		/* annoy the user because dlm usage is wrong */
-		WARN_ON(1);
-		log_error(ls, "%s %d %x %x %x %d %d %s", __func__,
+	if (rv)
+		log_debug(ls, "validate_lock_args %d %x %x %x %d %d %s",
 			  rv, lkb->lkb_id, lkb->lkb_flags, args->flags,
 			  lkb->lkb_status, lkb->lkb_wait_type,
 			  lkb->lkb_resource->res_name);
-		break;
-	default:
-		log_debug(ls, "%s %d %x %x %x %d %d %s", __func__,
-			  rv, lkb->lkb_id, lkb->lkb_flags, args->flags,
-			  lkb->lkb_status, lkb->lkb_wait_type,
-			  lkb->lkb_resource->res_name);
-		break;
-	}
-
 	return rv;
 }
 
@@ -2934,12 +2918,23 @@ static int validate_lock_args(struct dlm_ls *ls, struct dlm_lkb *lkb,
 static int validate_unlock_args(struct dlm_lkb *lkb, struct dlm_args *args)
 {
 	struct dlm_ls *ls = lkb->lkb_resource->res_ls;
-	int rv = -EBUSY;
+	int rv = -EINVAL;
 
-	/* normal unlock not allowed if there's any op in progress */
-	if (!(args->flags & (DLM_LKF_CANCEL | DLM_LKF_FORCEUNLOCK)) &&
-	    (lkb->lkb_wait_type || lkb->lkb_wait_count))
+	if (lkb->lkb_flags & DLM_IFL_MSTCPY) {
+		log_error(ls, "unlock on MSTCPY %x", lkb->lkb_id);
+		dlm_print_lkb(lkb);
 		goto out;
+	}
+
+	/* an lkb may still exist even though the lock is EOL'ed due to a
+	   cancel, unlock or failed noqueue request; an app can't use these
+	   locks; return same error as if the lkid had not been found at all */
+
+	if (lkb->lkb_flags & DLM_IFL_ENDOFLIFE) {
+		log_debug(ls, "unlock on ENDOFLIFE %x", lkb->lkb_id);
+		rv = -ENOENT;
+		goto out;
+	}
 
 	/* an lkb may be waiting for an rsb lookup to complete where the
 	   lookup was initiated by another lock */
@@ -2954,24 +2949,7 @@ static int validate_unlock_args(struct dlm_lkb *lkb, struct dlm_args *args)
 			unhold_lkb(lkb); /* undoes create_lkb() */
 		}
 		/* caller changes -EBUSY to 0 for CANCEL and FORCEUNLOCK */
-		goto out;
-	}
-
-	rv = -EINVAL;
-	if (lkb->lkb_flags & DLM_IFL_MSTCPY) {
-		log_error(ls, "unlock on MSTCPY %x", lkb->lkb_id);
-		dlm_print_lkb(lkb);
-		goto out;
-	}
-
-	/* an lkb may still exist even though the lock is EOL'ed due to a
-	 * cancel, unlock or failed noqueue request; an app can't use these
-	 * locks; return same error as if the lkid had not been found at all
-	 */
-
-	if (lkb->lkb_flags & DLM_IFL_ENDOFLIFE) {
-		log_debug(ls, "unlock on ENDOFLIFE %x", lkb->lkb_id);
-		rv = -ENOENT;
+		rv = -EBUSY;
 		goto out;
 	}
 
@@ -3044,7 +3022,13 @@ static int validate_unlock_args(struct dlm_lkb *lkb, struct dlm_args *args)
 			goto out;
 		}
 		/* add_to_waiters() will set OVERLAP_UNLOCK */
+		goto out_ok;
 	}
+
+	/* normal unlock not allowed if there's any op in progress */
+	rv = -EBUSY;
+	if (lkb->lkb_wait_type || lkb->lkb_wait_count)
+		goto out;
 
  out_ok:
 	/* an overlapping op shouldn't blow away exflags from other op */
@@ -3053,25 +3037,11 @@ static int validate_unlock_args(struct dlm_lkb *lkb, struct dlm_args *args)
 	lkb->lkb_astparam = args->astparam;
 	rv = 0;
  out:
-	switch (rv) {
-	case 0:
-		break;
-	case -EINVAL:
-		/* annoy the user because dlm usage is wrong */
-		WARN_ON(1);
-		log_error(ls, "%s %d %x %x %x %x %d %s", __func__, rv,
+	if (rv)
+		log_debug(ls, "validate_unlock_args %d %x %x %x %x %d %s", rv,
 			  lkb->lkb_id, lkb->lkb_flags, lkb->lkb_exflags,
 			  args->flags, lkb->lkb_wait_type,
 			  lkb->lkb_resource->res_name);
-		break;
-	default:
-		log_debug(ls, "%s %d %x %x %x %x %d %s", __func__, rv,
-			  lkb->lkb_id, lkb->lkb_flags, lkb->lkb_exflags,
-			  args->flags, lkb->lkb_wait_type,
-			  lkb->lkb_resource->res_name);
-		break;
-	}
-
 	return rv;
 }
 
@@ -3322,9 +3292,8 @@ static int _cancel_lock(struct dlm_rsb *r, struct dlm_lkb *lkb)
  * request_lock(), convert_lock(), unlock_lock(), cancel_lock()
  */
 
-static int request_lock(struct dlm_ls *ls, struct dlm_lkb *lkb,
-			const void *name, int len,
-			struct dlm_args *args)
+static int request_lock(struct dlm_ls *ls, struct dlm_lkb *lkb, char *name,
+			int len, struct dlm_args *args)
 {
 	struct dlm_rsb *r;
 	int error;
@@ -3423,7 +3392,7 @@ int dlm_lock(dlm_lockspace_t *lockspace,
 	     int mode,
 	     struct dlm_lksb *lksb,
 	     uint32_t flags,
-	     const void *name,
+	     void *name,
 	     unsigned int namelen,
 	     uint32_t parent_lkid,
 	     void (*ast) (void *astarg),
@@ -3469,7 +3438,7 @@ int dlm_lock(dlm_lockspace_t *lockspace,
 	if (error == -EINPROGRESS)
 		error = 0;
  out_put:
-	trace_dlm_lock_end(ls, lkb, name, namelen, mode, flags, error, true);
+	trace_dlm_lock_end(ls, lkb, name, namelen, mode, flags, error);
 
 	if (convert || error)
 		__put_lkb(ls, lkb);
@@ -5111,11 +5080,8 @@ void dlm_receive_buffer(union dlm_packet *p, int nodeid)
 	down_read(&ls->ls_recv_active);
 	if (hd->h_cmd == DLM_MSG)
 		dlm_receive_message(ls, &p->message, nodeid);
-	else if (hd->h_cmd == DLM_RCOM)
-		dlm_receive_rcom(ls, &p->rcom, nodeid);
 	else
-		log_error(ls, "invalid h_cmd %d from %d lockspace %x",
-			  hd->h_cmd, nodeid, le32_to_cpu(hd->u.h_lockspace));
+		dlm_receive_rcom(ls, &p->rcom, nodeid);
 	up_read(&ls->ls_recv_active);
 
 	dlm_put_lockspace(ls);
@@ -5835,7 +5801,6 @@ int dlm_user_request(struct dlm_ls *ls, struct dlm_user_args *ua,
 {
 	struct dlm_lkb *lkb;
 	struct dlm_args args;
-	bool do_put = true;
 	int error;
 
 	dlm_lock_recovery(ls);
@@ -5846,14 +5811,13 @@ int dlm_user_request(struct dlm_ls *ls, struct dlm_user_args *ua,
 		goto out;
 	}
 
-	trace_dlm_lock_start(ls, lkb, name, namelen, mode, flags);
-
 	if (flags & DLM_LKF_VALBLK) {
 		ua->lksb.sb_lvbptr = kzalloc(DLM_USER_LVB_LEN, GFP_NOFS);
 		if (!ua->lksb.sb_lvbptr) {
 			kfree(ua);
+			__put_lkb(ls, lkb);
 			error = -ENOMEM;
-			goto out_put;
+			goto out;
 		}
 	}
 #ifdef CONFIG_DLM_DEPRECATED_API
@@ -5867,7 +5831,8 @@ int dlm_user_request(struct dlm_ls *ls, struct dlm_user_args *ua,
 		kfree(ua->lksb.sb_lvbptr);
 		ua->lksb.sb_lvbptr = NULL;
 		kfree(ua);
-		goto out_put;
+		__put_lkb(ls, lkb);
+		goto out;
 	}
 
 	/* After ua is attached to lkb it will be freed by dlm_free_lkb().
@@ -5886,7 +5851,8 @@ int dlm_user_request(struct dlm_ls *ls, struct dlm_user_args *ua,
 		error = 0;
 		fallthrough;
 	default:
-		goto out_put;
+		__put_lkb(ls, lkb);
+		goto out;
 	}
 
 	/* add this new lkb to the per-process list of locks */
@@ -5894,11 +5860,6 @@ int dlm_user_request(struct dlm_ls *ls, struct dlm_user_args *ua,
 	hold_lkb(lkb);
 	list_add_tail(&lkb->lkb_ownqueue, &ua->proc->locks);
 	spin_unlock(&ua->proc->locks_spin);
-	do_put = false;
- out_put:
-	trace_dlm_lock_end(ls, lkb, name, namelen, mode, flags, error, false);
-	if (do_put)
-		__put_lkb(ls, lkb);
  out:
 	dlm_unlock_recovery(ls);
 	return error;
@@ -5923,8 +5884,6 @@ int dlm_user_convert(struct dlm_ls *ls, struct dlm_user_args *ua_tmp,
 	error = find_lkb(ls, lkid, &lkb);
 	if (error)
 		goto out;
-
-	trace_dlm_lock_start(ls, lkb, NULL, 0, mode, flags);
 
 	/* user can change the params on its lock when it converts it, or
 	   add an lvb that didn't exist before */
@@ -5963,7 +5922,6 @@ int dlm_user_convert(struct dlm_ls *ls, struct dlm_user_args *ua_tmp,
 	if (error == -EINPROGRESS || error == -EAGAIN || error == -EDEADLK)
 		error = 0;
  out_put:
-	trace_dlm_lock_end(ls, lkb, NULL, 0, mode, flags, error, false);
 	dlm_put_lkb(lkb);
  out:
 	dlm_unlock_recovery(ls);
@@ -6056,8 +6014,6 @@ int dlm_user_unlock(struct dlm_ls *ls, struct dlm_user_args *ua_tmp,
 	if (error)
 		goto out;
 
-	trace_dlm_unlock_start(ls, lkb, flags);
-
 	ua = lkb->lkb_ua;
 
 	if (lvb_in && ua->lksb.sb_lvbptr)
@@ -6086,7 +6042,6 @@ int dlm_user_unlock(struct dlm_ls *ls, struct dlm_user_args *ua_tmp,
 		list_move(&lkb->lkb_ownqueue, &ua->proc->unlocking);
 	spin_unlock(&ua->proc->locks_spin);
  out_put:
-	trace_dlm_unlock_end(ls, lkb, flags, error);
 	dlm_put_lkb(lkb);
  out:
 	dlm_unlock_recovery(ls);
@@ -6108,8 +6063,6 @@ int dlm_user_cancel(struct dlm_ls *ls, struct dlm_user_args *ua_tmp,
 	if (error)
 		goto out;
 
-	trace_dlm_unlock_start(ls, lkb, flags);
-
 	ua = lkb->lkb_ua;
 	if (ua_tmp->castparam)
 		ua->castparam = ua_tmp->castparam;
@@ -6127,7 +6080,6 @@ int dlm_user_cancel(struct dlm_ls *ls, struct dlm_user_args *ua_tmp,
 	if (error == -EBUSY)
 		error = 0;
  out_put:
-	trace_dlm_unlock_end(ls, lkb, flags, error);
 	dlm_put_lkb(lkb);
  out:
 	dlm_unlock_recovery(ls);
@@ -6148,8 +6100,6 @@ int dlm_user_deadlock(struct dlm_ls *ls, uint32_t flags, uint32_t lkid)
 	error = find_lkb(ls, lkid, &lkb);
 	if (error)
 		goto out;
-
-	trace_dlm_unlock_start(ls, lkb, flags);
 
 	ua = lkb->lkb_ua;
 
@@ -6179,7 +6129,6 @@ int dlm_user_deadlock(struct dlm_ls *ls, uint32_t flags, uint32_t lkid)
 	if (error == -EBUSY)
 		error = 0;
  out_put:
-	trace_dlm_unlock_end(ls, lkb, flags, error);
 	dlm_put_lkb(lkb);
  out:
 	dlm_unlock_recovery(ls);
@@ -6235,7 +6184,7 @@ static struct dlm_lkb *del_proc_lock(struct dlm_ls *ls,
 {
 	struct dlm_lkb *lkb = NULL;
 
-	spin_lock(&ls->ls_clear_proc_locks);
+	mutex_lock(&ls->ls_clear_proc_locks);
 	if (list_empty(&proc->locks))
 		goto out;
 
@@ -6247,7 +6196,7 @@ static struct dlm_lkb *del_proc_lock(struct dlm_ls *ls,
 	else
 		lkb->lkb_flags |= DLM_IFL_DEAD;
  out:
-	spin_unlock(&ls->ls_clear_proc_locks);
+	mutex_unlock(&ls->ls_clear_proc_locks);
 	return lkb;
 }
 
@@ -6284,7 +6233,7 @@ void dlm_clear_proc_locks(struct dlm_ls *ls, struct dlm_user_proc *proc)
 		dlm_put_lkb(lkb);
 	}
 
-	spin_lock(&ls->ls_clear_proc_locks);
+	mutex_lock(&ls->ls_clear_proc_locks);
 
 	/* in-progress unlocks */
 	list_for_each_entry_safe(lkb, safe, &proc->unlocking, lkb_ownqueue) {
@@ -6300,7 +6249,7 @@ void dlm_clear_proc_locks(struct dlm_ls *ls, struct dlm_user_proc *proc)
 		dlm_put_lkb(lkb);
 	}
 
-	spin_unlock(&ls->ls_clear_proc_locks);
+	mutex_unlock(&ls->ls_clear_proc_locks);
 	dlm_unlock_recovery(ls);
 }
 

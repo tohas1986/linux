@@ -450,7 +450,8 @@ static int mcf8390_remove(struct platform_device *pdev)
 
 	unregister_netdev(dev);
 	mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	release_mem_region(mem->start, resource_size(mem));
+	if (mem)
+		release_mem_region(mem->start, resource_size(mem));
 	free_netdev(dev);
 	return 0;
 }

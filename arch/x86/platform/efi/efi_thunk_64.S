@@ -23,6 +23,7 @@
 #include <linux/objtool.h>
 #include <asm/page_types.h>
 #include <asm/segment.h>
+#include <asm/nospec-branch.h>
 
 	.text
 	.code64
@@ -72,18 +73,10 @@ STACK_FRAME_NON_STANDARD __efi64_thunk
 	pushq	%rdi			/* EFI runtime service address */
 	lretq
 
-	// This return instruction is not needed for correctness, as it will
-	// never be reached. It only exists to make objtool happy, which will
-	// otherwise complain about unreachable instructions in the callers.
-	RET
-SYM_FUNC_END(__efi64_thunk)
-
-	.section ".rodata", "a", @progbits
-	.balign	16
-SYM_DATA_START(__efi64_thunk_ret_tramp)
 1:	movq	0x20(%rsp), %rsp
 	pop	%rbx
 	pop	%rbp
+	ANNOTATE_UNRET_SAFE
 	ret
 	int3
 
@@ -91,7 +84,7 @@ SYM_DATA_START(__efi64_thunk_ret_tramp)
 2:	pushl	$__KERNEL_CS
 	pushl	%ebp
 	lret
-SYM_DATA_END(__efi64_thunk_ret_tramp)
+SYM_FUNC_END(__efi64_thunk)
 
 	.bss
 	.balign 8

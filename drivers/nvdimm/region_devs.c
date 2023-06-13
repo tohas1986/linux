@@ -509,12 +509,15 @@ static ssize_t align_store(struct device *dev,
 {
 	struct nd_region *nd_region = to_nd_region(dev);
 	unsigned long val, dpa;
-	u32 mappings, remainder;
+	u32 remainder;
 	int rc;
 
 	rc = kstrtoul(buf, 0, &val);
 	if (rc)
 		return rc;
+
+	if (!nd_region->ndr_mappings)
+		return -ENXIO;
 
 	/*
 	 * Ensure space-align is evenly divisible by the region
@@ -523,8 +526,7 @@ static ssize_t align_store(struct device *dev,
 	 * contribute to the tail capacity in system-physical-address
 	 * space for the namespace.
 	 */
-	mappings = max_t(u32, 1, nd_region->ndr_mappings);
-	dpa = div_u64_rem(val, mappings, &remainder);
+	dpa = div_u64_rem(val, nd_region->ndr_mappings, &remainder);
 	if (!is_power_of_2(dpa) || dpa < PAGE_SIZE
 			|| val > region_size(nd_region) || remainder)
 		return -EINVAL;
@@ -1094,7 +1096,7 @@ int nvdimm_flush(struct nd_region *nd_region, struct bio *bio)
 	return rc;
 }
 /**
- * generic_nvdimm_flush() - flush any posted write queues between the cpu and pmem media
+ * nvdimm_flush - flush any posted write queues between the cpu and pmem media
  * @nd_region: interleaved pmem region
  */
 int generic_nvdimm_flush(struct nd_region *nd_region)

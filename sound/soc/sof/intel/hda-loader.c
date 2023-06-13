@@ -177,13 +177,14 @@ int cl_dsp_init(struct snd_sof_dev *sdev, int stream_tag, bool imr_boot)
 	 * - IMR boot: wait for ROM firmware entered (firmware booted up from IMR)
 	 */
 	if (imr_boot)
-		target_status = FSR_STATE_FW_ENTERED;
+		target_status = HDA_DSP_ROM_FW_ENTERED;
 	else
-		target_status = FSR_STATE_INIT_DONE;
+		target_status = HDA_DSP_ROM_INIT;
 
 	ret = snd_sof_dsp_read_poll_timeout(sdev, HDA_DSP_BAR,
 					chip->rom_status_reg, status,
-					(FSR_TO_STATE_CODE(status) == target_status),
+					((status & HDA_DSP_ROM_STS_MASK)
+						== target_status),
 					HDA_DSP_REG_POLL_INTERVAL_US,
 					chip->rom_init_timeout *
 					USEC_PER_MSEC);
@@ -291,7 +292,8 @@ int hda_cl_copy_fw(struct snd_sof_dev *sdev, struct hdac_ext_stream *hext_stream
 
 	status = snd_sof_dsp_read_poll_timeout(sdev, HDA_DSP_BAR,
 					chip->rom_status_reg, reg,
-					(FSR_TO_STATE_CODE(reg) == FSR_STATE_FW_ENTERED),
+					((reg & HDA_DSP_ROM_STS_MASK)
+						== HDA_DSP_ROM_FW_ENTERED),
 					HDA_DSP_REG_POLL_INTERVAL_US,
 					HDA_DSP_BASEFW_TIMEOUT_US);
 

@@ -254,16 +254,14 @@ xenvif_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	if (vif->hash.alg == XEN_NETIF_CTRL_HASH_ALGORITHM_NONE)
 		skb_clear_hash(skb);
 
-	if (!xenvif_rx_queue_tail(queue, skb))
-		goto drop;
-
+	xenvif_rx_queue_tail(queue, skb);
 	xenvif_kick_thread(queue);
 
 	return NETDEV_TX_OK;
 
  drop:
 	vif->dev->stats.tx_dropped++;
-	dev_kfree_skb_any(skb);
+	dev_kfree_skb(skb);
 	return NETDEV_TX_OK;
 }
 
@@ -593,8 +591,8 @@ int xenvif_init_queue(struct xenvif_queue *queue)
 	}
 
 	for (i = 0; i < MAX_PENDING_REQS; i++) {
-		queue->pending_tx_info[i].callback_struct = (struct ubuf_info_msgzc)
-			{ { .callback = xenvif_zerocopy_callback },
+		queue->pending_tx_info[i].callback_struct = (struct ubuf_info)
+			{ .callback = xenvif_zerocopy_callback,
 			  { { .ctx = NULL,
 			      .desc = i } } };
 		queue->grant_tx_handle[i] = NETBACK_INVALID_HANDLE;
@@ -725,7 +723,8 @@ int xenvif_connect_data(struct xenvif_queue *queue,
 	init_waitqueue_head(&queue->dealloc_wq);
 	atomic_set(&queue->inflight_packets, 0);
 
-	netif_napi_add(queue->vif->dev, &queue->napi, xenvif_poll);
+	netif_napi_add(queue->vif->dev, &queue->napi, xenvif_poll,
+			NAPI_POLL_WEIGHT);
 
 	queue->stalled = true;
 

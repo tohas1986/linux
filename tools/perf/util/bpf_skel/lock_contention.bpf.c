@@ -72,10 +72,9 @@ struct {
 int enabled;
 int has_cpu;
 int has_task;
-int stack_skip;
 
 /* error stat */
-int lost;
+unsigned long lost;
 
 static inline int can_record(void)
 {
@@ -118,7 +117,7 @@ int contention_begin(u64 *ctx)
 	pelem->timestamp = bpf_ktime_get_ns();
 	pelem->lock = (__u64)ctx[0];
 	pelem->flags = (__u32)ctx[1];
-	pelem->stack_id = bpf_get_stackid(ctx, &stacks, BPF_F_FAST_STACK_CMP | stack_skip);
+	pelem->stack_id = bpf_get_stackid(ctx, &stacks, BPF_F_FAST_STACK_CMP);
 
 	if (pelem->stack_id < 0)
 		lost++;

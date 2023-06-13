@@ -46,7 +46,6 @@ properties:
 
   adc:
     type: object
-    additionalProperties: false
     description: Optional hardware monitoring module
 
     properties:
@@ -60,9 +59,8 @@ properties:
         const: 0
 
     patternProperties:
-      "^channel@[0-9a-f]+$":
+      "^channel@[0-9]+$":
         type: object
-        additionalProperties: false
         description: |
           Properties for a single ADC which can report cooked values
           (i.e. temperature sensor based on thermister), raw values
@@ -115,7 +113,6 @@ properties:
 patternProperties:
   "^fan-controller@[0-9a-f]+$":
     type: object
-    additionalProperties: false
     description: Optional fan controller
 
     properties:

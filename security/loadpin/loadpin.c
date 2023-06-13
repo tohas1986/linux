@@ -21,8 +21,6 @@
 #include <linux/dm-verity-loadpin.h>
 #include <uapi/linux/loadpin.h>
 
-#define VERITY_DIGEST_FILE_HEADER "# LOADPIN_TRUSTED_VERITY_ROOT_DIGESTS"
-
 static void report_load(const char *origin, struct file *file, char *operation)
 {
 	char *cmdline, *pathname;
@@ -122,10 +120,20 @@ static void loadpin_sb_free_security(struct super_block *mnt_sb)
 	}
 }
 
-static int loadpin_check(struct file *file, enum kernel_read_file_id id)
+static int loadpin_read_file(struct file *file, enum kernel_read_file_id id,
+			     bool contents)
 {
 	struct super_block *load_root;
 	const char *origin = kernel_read_file_id_str(id);
+
+	/*
+	 * If we will not know that we'll be seeing the full contents
+	 * then we cannot trust a load will be complete and unchanged
+	 * off disk. Treat all contents=false hooks as if there were
+	 * no associated file struct.
+	 */
+	if (!contents)
+		file = NULL;
 
 	/* If the file id is excluded, ignore the pinning. */
 	if ((unsigned int)id < ARRAY_SIZE(ignore_read_file_id) &&
@@ -182,25 +190,9 @@ static int loadpin_check(struct file *file, enum kernel_read_file_id id)
 	return 0;
 }
 
-static int loadpin_read_file(struct file *file, enum kernel_read_file_id id,
-			     bool contents)
-{
-	/*
-	 * LoadPin only cares about the _origin_ of a file, not its
-	 * contents, so we can ignore the "are full contents available"
-	 * argument here.
-	 */
-	return loadpin_check(file, id);
-}
-
 static int loadpin_load_data(enum kernel_load_data_id id, bool contents)
 {
-	/*
-	 * LoadPin only cares about the _origin_ of a file, not its
-	 * contents, so a NULL file is passed, and we can ignore the
-	 * state of "contents".
-	 */
-	return loadpin_check(NULL, (enum kernel_read_file_id) id);
+	return loadpin_read_file(NULL, (enum kernel_read_file_id) id, contents);
 }
 
 static struct security_hook_list loadpin_hooks[] __lsm_ro_after_init = {
@@ -300,20 +292,8 @@ static int read_trusted_verity_root_digests(unsigned int fd)
 
 	p = strim(data);
 	while ((d = strsep(&p, "\n")) != NULL) {
-		int len;
+		int len = strlen(d);
 		struct dm_verity_loadpin_trusted_root_digest *trd;
-
-		if (d == data) {
-			/* first line, validate header */
-			if (strcmp(d, VERITY_DIGEST_FILE_HEADER)) {
-				rc = -EPROTO;
-				goto err;
-			}
-
-			continue;
-		}
-
-		len = strlen(d);
 
 		if (len % 2) {
 			rc = -EPROTO;

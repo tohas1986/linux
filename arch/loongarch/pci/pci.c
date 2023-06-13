@@ -9,7 +9,6 @@
 #include <linux/types.h>
 #include <linux/pci.h>
 #include <linux/vgaarb.h>
-#include <asm/cacheflush.h>
 #include <asm/loongson.h>
 
 #define PCI_DEVICE_ID_LOONGSON_HOST     0x7a00
@@ -46,10 +45,12 @@ static int __init pcibios_init(void)
 	unsigned int lsize;
 
 	/*
-	 * Set PCI cacheline size to that of the last level in the
+	 * Set PCI cacheline size to that of the highest level in the
 	 * cache hierarchy.
 	 */
-	lsize = cpu_last_level_cache_line_size();
+	lsize = cpu_dcache_line_size();
+	lsize = cpu_vcache_line_size() ? : lsize;
+	lsize = cpu_scache_line_size() ? : lsize;
 
 	BUG_ON(!lsize);
 

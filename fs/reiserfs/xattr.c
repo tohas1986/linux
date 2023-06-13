@@ -189,7 +189,7 @@ struct reiserfs_dentry_buf {
 	struct dentry *dentries[8];
 };
 
-static bool
+static int
 fill_with_dentries(struct dir_context *ctx, const char *name, int namelen,
 		   loff_t offset, u64 ino, unsigned int d_type)
 {
@@ -200,16 +200,16 @@ fill_with_dentries(struct dir_context *ctx, const char *name, int namelen,
 	WARN_ON_ONCE(!inode_is_locked(d_inode(dbuf->xadir)));
 
 	if (dbuf->count == ARRAY_SIZE(dbuf->dentries))
-		return false;
+		return -ENOSPC;
 
 	if (name[0] == '.' && (namelen < 2 ||
 			       (namelen == 2 && name[1] == '.')))
-		return true;
+		return 0;
 
 	dentry = lookup_one_len(name, dbuf->xadir, namelen);
 	if (IS_ERR(dentry)) {
 		dbuf->err = PTR_ERR(dentry);
-		return false;
+		return PTR_ERR(dentry);
 	} else if (d_really_is_negative(dentry)) {
 		/* A directory entry exists, but no file? */
 		reiserfs_error(dentry->d_sb, "xattr-20003",
@@ -218,11 +218,11 @@ fill_with_dentries(struct dir_context *ctx, const char *name, int namelen,
 			       dentry, dbuf->xadir);
 		dput(dentry);
 		dbuf->err = -EIO;
-		return false;
+		return -EIO;
 	}
 
 	dbuf->dentries[dbuf->count++] = dentry;
-	return true;
+	return 0;
 }
 
 static void
@@ -797,7 +797,7 @@ struct listxattr_buf {
 	struct dentry *dentry;
 };
 
-static bool listxattr_filler(struct dir_context *ctx, const char *name,
+static int listxattr_filler(struct dir_context *ctx, const char *name,
 			    int namelen, loff_t offset, u64 ino,
 			    unsigned int d_type)
 {
@@ -813,19 +813,19 @@ static bool listxattr_filler(struct dir_context *ctx, const char *name,
 						    name);
 		if (!handler /* Unsupported xattr name */ ||
 		    (handler->list && !handler->list(b->dentry)))
-			return true;
+			return 0;
 		size = namelen + 1;
 		if (b->buf) {
 			if (b->pos + size > b->size) {
 				b->pos = -ERANGE;
-				return false;
+				return -ERANGE;
 			}
 			memcpy(b->buf + b->pos, name, namelen);
 			b->buf[b->pos + namelen] = 0;
 		}
 		b->pos += size;
 	}
-	return true;
+	return 0;
 }
 
 /*

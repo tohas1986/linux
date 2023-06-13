@@ -113,6 +113,13 @@ int copy_thread(struct task_struct *p, const struct kernel_clone_args *args)
 }
 
 /*
+ * Release any architecture-specific resources locked by thread
+ */
+void release_thread(struct task_struct *dead_task)
+{
+}
+
+/*
  * Some archs flush debug and FPU info here
  */
 void flush_thread(void)

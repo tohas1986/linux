@@ -47,6 +47,8 @@ properties:
         - DIO3
         - DIO4
 
+  spi-max-frequency: true
+
   spi-cpha: true
   spi-cpol: true
 
@@ -94,6 +96,8 @@ properties:
       - DIO3
       - DIO4
 
+additionalProperties: false
+
 required:
   - compatible
   - reg
@@ -101,11 +105,6 @@ required:
   - spi-cpha
   - spi-cpol
   - spi-max-frequency
-
-allOf:
-  - $ref: /schemas/spi/spi-peripheral-props.yaml#
-
-unevaluatedProperties: false
 
 examples:
   - |

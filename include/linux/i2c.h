@@ -273,7 +273,7 @@ struct i2c_driver {
 
 	/* Standard driver model interfaces */
 	int (*probe)(struct i2c_client *client, const struct i2c_device_id *id);
-	void (*remove)(struct i2c_client *client);
+	int (*remove)(struct i2c_client *client);
 
 	/* New driver model interface to aid the seamless removal of the
 	 * current probe()'s, more commonly unused than used second parameter.
@@ -769,6 +769,13 @@ struct i2c_adapter {
 
 	struct irq_domain *host_notify_domain;
 	struct regulator *bus_regulator;
+
+	/*
+	 * These will be used by root adpaters only. For muxes, each mux core
+	 * has these individually.
+	 */
+	struct mutex hold_lock; /* mutex for bus holding */
+	struct timer_list hold_timer;
 };
 #define to_i2c_adapter(d) container_of(d, struct i2c_adapter, dev)
 
@@ -1104,6 +1111,24 @@ static inline struct i2c_client *i2c_acpi_new_device(struct device *dev,
 						     struct i2c_board_info *info)
 {
 	return i2c_acpi_new_device_by_fwnode(dev_fwnode(dev), index, info);
+}
+
+enum i2c_hold_msg_type {
+	I2C_HOLD_MSG_NONE,
+	I2C_HOLD_MSG_SET,
+	I2C_HOLD_MSG_RESET
+};
+
+static inline enum i2c_hold_msg_type i2c_check_hold_msg(u16 flags, u16 len, u16 *buf)
+{
+	if (flags & I2C_M_HOLD && len == sizeof(u16)) {
+		if (*buf)
+			return I2C_HOLD_MSG_SET;
+
+		return I2C_HOLD_MSG_RESET;
+	}
+
+	return I2C_HOLD_MSG_NONE;
 }
 
 #endif /* _LINUX_I2C_H */

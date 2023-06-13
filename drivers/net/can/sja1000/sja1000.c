@@ -661,6 +661,8 @@ static const struct ethtool_ops sja1000_ethtool_ops = {
 
 int register_sja1000dev(struct net_device *dev)
 {
+	int ret;
+
 	if (!sja1000_probe_chip(dev))
 		return -ENODEV;
 
@@ -671,7 +673,9 @@ int register_sja1000dev(struct net_device *dev)
 	set_reset_mode(dev);
 	chipset_init(dev);
 
-	return register_candev(dev);
+	ret =  register_candev(dev);
+
+	return ret;
 }
 EXPORT_SYMBOL_GPL(register_sja1000dev);
 

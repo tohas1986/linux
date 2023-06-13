@@ -150,7 +150,7 @@ static bool optc314_disable_crtc(struct timing_generator *optc)
 	return true;
 }
 
-static void optc314_phantom_crtc_post_enable(struct timing_generator *optc)
+void optc314_phantom_crtc_post_enable(struct timing_generator *optc)
 {
 	struct optc *optc1 = DCN10TG_FROM_TG(optc);
 

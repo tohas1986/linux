@@ -41,6 +41,8 @@ struct ohci_platform_priv {
 	struct reset_control *resets;
 };
 
+static const char hcd_name[] = "ohci-platform";
+
 static int ohci_platform_power_on(struct platform_device *dev)
 {
 	struct usb_hcd *hcd = platform_get_drvdata(dev);
@@ -287,7 +289,7 @@ static int ohci_platform_suspend(struct device *dev)
 	return ret;
 }
 
-static int ohci_platform_resume_common(struct device *dev, bool hibernated)
+static int ohci_platform_resume(struct device *dev)
 {
 	struct usb_hcd *hcd = dev_get_drvdata(dev);
 	struct usb_ohci_pdata *pdata = dev_get_platdata(dev);
@@ -299,23 +301,13 @@ static int ohci_platform_resume_common(struct device *dev, bool hibernated)
 			return err;
 	}
 
-	ohci_resume(hcd, hibernated);
+	ohci_resume(hcd, false);
 
 	pm_runtime_disable(dev);
 	pm_runtime_set_active(dev);
 	pm_runtime_enable(dev);
 
 	return 0;
-}
-
-static int ohci_platform_resume(struct device *dev)
-{
-	return ohci_platform_resume_common(dev, false);
-}
-
-static int ohci_platform_restore(struct device *dev)
-{
-	return ohci_platform_resume_common(dev, true);
 }
 #endif /* CONFIG_PM_SLEEP */
 
@@ -333,16 +325,8 @@ static const struct platform_device_id ohci_platform_table[] = {
 };
 MODULE_DEVICE_TABLE(platform, ohci_platform_table);
 
-#ifdef CONFIG_PM_SLEEP
-static const struct dev_pm_ops ohci_platform_pm_ops = {
-	.suspend = ohci_platform_suspend,
-	.resume = ohci_platform_resume,
-	.freeze = ohci_platform_suspend,
-	.thaw = ohci_platform_resume,
-	.poweroff = ohci_platform_suspend,
-	.restore = ohci_platform_restore,
-};
-#endif
+static SIMPLE_DEV_PM_OPS(ohci_platform_pm_ops, ohci_platform_suspend,
+	ohci_platform_resume);
 
 static struct platform_driver ohci_platform_driver = {
 	.id_table	= ohci_platform_table,
@@ -351,9 +335,7 @@ static struct platform_driver ohci_platform_driver = {
 	.shutdown	= usb_hcd_platform_shutdown,
 	.driver		= {
 		.name	= "ohci-platform",
-#ifdef CONFIG_PM_SLEEP
 		.pm	= &ohci_platform_pm_ops,
-#endif
 		.of_match_table = ohci_platform_ids,
 		.probe_type = PROBE_PREFER_ASYNCHRONOUS,
 	}
@@ -363,6 +345,8 @@ static int __init ohci_platform_init(void)
 {
 	if (usb_disabled())
 		return -ENODEV;
+
+	pr_info("%s: " DRIVER_DESC "\n", hcd_name);
 
 	ohci_init_driver(&ohci_platform_hc_driver, &platform_overrides);
 	return platform_driver_register(&ohci_platform_driver);

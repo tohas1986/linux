@@ -1191,7 +1191,7 @@ correct_plug_type:
 				pt_gnd_mic_swap_cnt = 0;
 				plug_type = wcd_mbhc_get_plug_from_adc(mbhc, output_mv);
 				continue;
-			} else /* Error if (cross_conn < 0) */
+			} else if (cross_conn < 0) /* Error */
 				continue;
 
 			if (pt_gnd_mic_swap_cnt == GND_MIC_SWAP_THRESHOLD) {

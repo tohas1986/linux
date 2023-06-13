@@ -2,7 +2,9 @@
 /* Copyright (c) 2019, Vladimir Oltean <olteanv@gmail.com>
  *
  * This module is not a complete tagger implementation. It only provides
- * primitives for taggers that rely on 802.1Q VLAN tags to use.
+ * primitives for taggers that rely on 802.1Q VLAN tags to use. The
+ * dsa_8021q_netdev_ops is registered for API compliance and not used
+ * directly by callers.
  */
 #include <linux/if_vlan.h>
 #include <linux/dsa/8021q.h>
@@ -330,7 +332,7 @@ static int dsa_tag_8021q_port_setup(struct dsa_switch *ds, int port)
 	if (!dsa_port_is_user(dp))
 		return 0;
 
-	master = dsa_port_to_master(dp);
+	master = dp->cpu_dp->master;
 
 	err = dsa_port_tag_8021q_vlan_add(dp, vid, false);
 	if (err) {
@@ -359,7 +361,7 @@ static void dsa_tag_8021q_port_teardown(struct dsa_switch *ds, int port)
 	if (!dsa_port_is_user(dp))
 		return;
 
-	master = dsa_port_to_master(dp);
+	master = dp->cpu_dp->master;
 
 	dsa_port_tag_8021q_vlan_del(dp, vid, false);
 
@@ -398,7 +400,6 @@ static void dsa_tag_8021q_teardown(struct dsa_switch *ds)
 int dsa_tag_8021q_register(struct dsa_switch *ds, __be16 proto)
 {
 	struct dsa_8021q_context *ctx;
-	int err;
 
 	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
 	if (!ctx)
@@ -411,15 +412,7 @@ int dsa_tag_8021q_register(struct dsa_switch *ds, __be16 proto)
 
 	ds->tag_8021q_ctx = ctx;
 
-	err = dsa_tag_8021q_setup(ds);
-	if (err)
-		goto err_free;
-
-	return 0;
-
-err_free:
-	kfree(ctx);
-	return err;
+	return dsa_tag_8021q_setup(ds);
 }
 EXPORT_SYMBOL_GPL(dsa_tag_8021q_register);
 

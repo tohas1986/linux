@@ -243,7 +243,7 @@ void btrfs_free_dummy_block_group(struct btrfs_block_group *cache)
 {
 	if (!cache)
 		return;
-	btrfs_remove_free_space_cache(cache);
+	__btrfs_remove_free_space_cache(cache->free_space_ctl);
 	kfree(cache->free_space_ctl);
 	kfree(cache);
 }

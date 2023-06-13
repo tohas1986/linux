@@ -39,8 +39,6 @@
 #include "panel_cntl.h"
 
 #define MAX_CLOCK_SOURCES 7
-#define MAX_SVP_PHANTOM_STREAMS 2
-#define MAX_SVP_PHANTOM_PLANES 2
 
 void enable_surface_flip_reporting(struct dc_plane_state *plane_state,
 		uint32_t controller_id);
@@ -234,7 +232,6 @@ struct resource_funcs {
             unsigned int index);
 
 	bool (*remove_phantom_pipes)(struct dc *dc, struct dc_state *context);
-	void (*get_panel_config_defaults)(struct dc_panel_config *panel_config);
 };
 
 struct audio_support{
@@ -402,10 +399,6 @@ struct pipe_ctx {
 	struct dc_stream_state *stream;
 
 	struct plane_resource plane_res;
-
-	/**
-	 * @stream_res: Reference to DCN resource components such OPP and DSC.
-	 */
 	struct stream_resource stream_res;
 	struct link_resource link_res;
 
@@ -441,6 +434,7 @@ struct pipe_ctx {
 	union pipe_update_flags update_flags;
 	struct dwbc *dwbc;
 	struct mcif_wb *mcif_wb;
+	bool vtp_locked;
 };
 
 /* Data used for dynamic link encoder assignment.
@@ -494,8 +488,6 @@ struct dcn_bw_output {
 	struct dcn_watermark_set watermarks;
 	struct dcn_bw_writeback bw_writeback;
 	int compbuf_size_kb;
-	unsigned int legacy_svp_drr_stream_index;
-	bool legacy_svp_drr_stream_index_valid;
 };
 
 union bw_output {

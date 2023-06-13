@@ -8,8 +8,6 @@
 #include "qcom-msm8226.dtsi"
 #include "qcom-pm8226.dtsi"
 
-/delete-node/ &adsp_region;
-
 / {
 	model = "ASUS ZenWatch 2";
 	compatible = "asus,sparrow", "qcom,apq8026";
@@ -57,10 +55,6 @@
 		pinctrl-names = "default";
 		pinctrl-0 = <&wlan_regulator_default_state>;
 	};
-};
-
-&adsp {
-	status = "okay";
 };
 
 &blsp1_uart1 {

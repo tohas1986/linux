@@ -1302,14 +1302,12 @@ static int igt_reset_wait(void *arg)
 {
 	struct intel_gt *gt = arg;
 	struct i915_gpu_error *global = &gt->i915->gpu_error;
-	struct intel_engine_cs *engine;
+	struct intel_engine_cs *engine = gt->engine[RCS0];
 	struct i915_request *rq;
 	unsigned int reset_count;
 	struct hang h;
 	long timeout;
 	int err;
-
-	engine = intel_selftest_find_any_engine(gt);
 
 	if (!engine || !intel_engine_can_store_dword(engine))
 		return 0;
@@ -1434,7 +1432,7 @@ static int __igt_reset_evict_vma(struct intel_gt *gt,
 				 int (*fn)(void *),
 				 unsigned int flags)
 {
-	struct intel_engine_cs *engine;
+	struct intel_engine_cs *engine = gt->engine[RCS0];
 	struct drm_i915_gem_object *obj;
 	struct task_struct *tsk = NULL;
 	struct i915_request *rq;
@@ -1445,8 +1443,6 @@ static int __igt_reset_evict_vma(struct intel_gt *gt,
 
 	if (!gt->ggtt->num_fences && flags & EXEC_OBJECT_NEEDS_FENCE)
 		return 0;
-
-	engine = intel_selftest_find_any_engine(gt);
 
 	if (!engine || !intel_engine_can_store_dword(engine))
 		return 0;
@@ -1823,13 +1819,11 @@ static int igt_handle_error(void *arg)
 {
 	struct intel_gt *gt = arg;
 	struct i915_gpu_error *global = &gt->i915->gpu_error;
-	struct intel_engine_cs *engine;
+	struct intel_engine_cs *engine = gt->engine[RCS0];
 	struct hang h;
 	struct i915_request *rq;
 	struct i915_gpu_coredump *error;
 	int err;
-
-	engine = intel_selftest_find_any_engine(gt);
 
 	/* Check that we can issue a global GPU and engine reset */
 

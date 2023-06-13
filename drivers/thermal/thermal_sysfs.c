@@ -49,11 +49,7 @@ static ssize_t
 mode_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct thermal_zone_device *tz = to_thermal_zone(dev);
-	int enabled;
-
-	mutex_lock(&tz->lock);
-	enabled = thermal_zone_device_is_enabled(tz);
-	mutex_unlock(&tz->lock);
+	int enabled = thermal_zone_device_is_enabled(tz);
 
 	return sprintf(buf, "%s\n", enabled ? "enabled" : "disabled");
 }
@@ -119,7 +115,7 @@ trip_point_temp_store(struct device *dev, struct device_attribute *attr,
 	int temperature, hyst = 0;
 	enum thermal_trip_type type;
 
-	if (!tz->ops->set_trip_temp && !tz->trips)
+	if (!tz->ops->set_trip_temp)
 		return -EPERM;
 
 	if (sscanf(attr->attr.name, "trip_point_%d_temp", &trip) != 1)
@@ -128,14 +124,9 @@ trip_point_temp_store(struct device *dev, struct device_attribute *attr,
 	if (kstrtoint(buf, 10, &temperature))
 		return -EINVAL;
 
-	if (tz->ops->set_trip_temp) {
-		ret = tz->ops->set_trip_temp(tz, trip, temperature);
-		if (ret)
-			return ret;
-	}
-
-	if (tz->trips)
-		tz->trips[trip].temperature = temperature;
+	ret = tz->ops->set_trip_temp(tz, trip, temperature);
+	if (ret)
+		return ret;
 
 	if (tz->ops->get_trip_hyst) {
 		ret = tz->ops->get_trip_hyst(tz, trip, &hyst);
@@ -589,8 +580,13 @@ static ssize_t max_state_show(struct device *dev, struct device_attribute *attr,
 			      char *buf)
 {
 	struct thermal_cooling_device *cdev = to_cooling_device(dev);
+	unsigned long state;
+	int ret;
 
-	return sprintf(buf, "%ld\n", cdev->max_state);
+	ret = cdev->ops->get_max_state(cdev, &state);
+	if (ret)
+		return ret;
+	return sprintf(buf, "%ld\n", state);
 }
 
 static ssize_t cur_state_show(struct device *dev, struct device_attribute *attr,
@@ -618,10 +614,6 @@ cur_state_store(struct device *dev, struct device_attribute *attr,
 		return -EINVAL;
 
 	if ((long)state < 0)
-		return -EINVAL;
-
-	/* Requested state should be less than max_state + 1 */
-	if (state > cdev->max_state)
 		return -EINVAL;
 
 	mutex_lock(&cdev->lock);

@@ -122,15 +122,13 @@ static int ibm_panel_i2c_slave_cb(struct i2c_client *client,
 static int ibm_panel_probe(struct i2c_client *client,
 			   const struct i2c_device_id *id)
 {
-	struct ibm_panel *panel;
 	int i;
-	int error;
+	int rc;
+	struct ibm_panel *panel = devm_kzalloc(&client->dev, sizeof(*panel),
+					       GFP_KERNEL);
 
-	panel = devm_kzalloc(&client->dev, sizeof(*panel), GFP_KERNEL);
 	if (!panel)
 		return -ENOMEM;
-
-	spin_lock_init(&panel->lock);
 
 	panel->input = devm_input_allocate_device(&client->dev);
 	if (!panel->input)
@@ -139,11 +137,10 @@ static int ibm_panel_probe(struct i2c_client *client,
 	panel->input->name = client->name;
 	panel->input->id.bustype = BUS_I2C;
 
-	error = device_property_read_u32_array(&client->dev,
-					       "linux,keycodes",
-					       panel->keycodes,
-					       PANEL_KEYCODES_COUNT);
-	if (error) {
+	rc = device_property_read_u32_array(&client->dev, "linux,keycodes",
+					    panel->keycodes,
+					    PANEL_KEYCODES_COUNT);
+	if (rc) {
 		/*
 		 * Use gamepad buttons as defaults for compatibility with
 		 * existing applications.
@@ -156,34 +153,35 @@ static int ibm_panel_probe(struct i2c_client *client,
 	for (i = 0; i < PANEL_KEYCODES_COUNT; ++i)
 		input_set_capability(panel->input, EV_KEY, panel->keycodes[i]);
 
-	error = input_register_device(panel->input);
-	if (error) {
-		dev_err(&client->dev,
-			"Failed to register input device: %d\n", error);
-		return error;
+	rc = input_register_device(panel->input);
+	if (rc) {
+		dev_err(&client->dev, "Failed to register input device: %d\n",
+			rc);
+		return rc;
 	}
+
+	spin_lock_init(&panel->lock);
 
 	i2c_set_clientdata(client, panel);
-	error = i2c_slave_register(client, ibm_panel_i2c_slave_cb);
-	if (error) {
-		dev_err(&client->dev,
-			"Failed to register as i2c slave: %d\n", error);
-		return error;
-	}
+	rc = i2c_slave_register(client, ibm_panel_i2c_slave_cb);
+	if (rc)
+		dev_err(&client->dev, "Failed to register as i2c slave: %d\n",
+			rc);
 
-	return 0;
+	return rc;
 }
 
-static void ibm_panel_remove(struct i2c_client *client)
+static int ibm_panel_remove(struct i2c_client *client)
 {
 	i2c_slave_unregister(client);
+
+	return 0;
 }
 
 static const struct of_device_id ibm_panel_match[] = {
 	{ .compatible = "ibm,op-panel" },
 	{ }
 };
-MODULE_DEVICE_TABLE(of, ibm_panel_match);
 
 static struct i2c_driver ibm_panel_driver = {
 	.driver = {

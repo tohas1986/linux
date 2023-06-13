@@ -480,36 +480,41 @@ unsigned long nilfs_find_uncommitted_extent(struct inode *inode,
 					    sector_t start_blk,
 					    sector_t *blkoff)
 {
-	unsigned int i, nr_folios;
+	unsigned int i;
 	pgoff_t index;
+	unsigned int nblocks_in_page;
 	unsigned long length = 0;
-	struct folio_batch fbatch;
-	struct folio *folio;
+	sector_t b;
+	struct pagevec pvec;
+	struct page *page;
 
 	if (inode->i_mapping->nrpages == 0)
 		return 0;
 
 	index = start_blk >> (PAGE_SHIFT - inode->i_blkbits);
+	nblocks_in_page = 1U << (PAGE_SHIFT - inode->i_blkbits);
 
-	folio_batch_init(&fbatch);
+	pagevec_init(&pvec);
 
 repeat:
-	nr_folios = filemap_get_folios_contig(inode->i_mapping, &index, ULONG_MAX,
-			&fbatch);
-	if (nr_folios == 0)
+	pvec.nr = find_get_pages_contig(inode->i_mapping, index, PAGEVEC_SIZE,
+					pvec.pages);
+	if (pvec.nr == 0)
 		return length;
 
+	if (length > 0 && pvec.pages[0]->index > index)
+		goto out;
+
+	b = pvec.pages[0]->index << (PAGE_SHIFT - inode->i_blkbits);
 	i = 0;
 	do {
-		folio = fbatch.folios[i];
+		page = pvec.pages[i];
 
-		folio_lock(folio);
-		if (folio_buffers(folio)) {
+		lock_page(page);
+		if (page_has_buffers(page)) {
 			struct buffer_head *bh, *head;
-			sector_t b;
 
-			b = folio->index << (PAGE_SHIFT - inode->i_blkbits);
-			bh = head = folio_buffers(folio);
+			bh = head = page_buffers(page);
 			do {
 				if (b < start_blk)
 					continue;
@@ -524,17 +529,21 @@ repeat:
 		} else {
 			if (length > 0)
 				goto out_locked;
+
+			b += nblocks_in_page;
 		}
-		folio_unlock(folio);
+		unlock_page(page);
 
-	} while (++i < nr_folios);
+	} while (++i < pagevec_count(&pvec));
 
-	folio_batch_release(&fbatch);
+	index = page->index + 1;
+	pagevec_release(&pvec);
 	cond_resched();
 	goto repeat;
 
 out_locked:
-	folio_unlock(folio);
-	folio_batch_release(&fbatch);
+	unlock_page(page);
+out:
+	pagevec_release(&pvec);
 	return length;
 }

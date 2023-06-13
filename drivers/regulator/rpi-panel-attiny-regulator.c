@@ -381,11 +381,13 @@ error:
 	return ret;
 }
 
-static void attiny_i2c_remove(struct i2c_client *client)
+static int attiny_i2c_remove(struct i2c_client *client)
 {
 	struct attiny_lcd *state = i2c_get_clientdata(client);
 
 	mutex_destroy(&state->lock);
+
+	return 0;
 }
 
 static const struct of_device_id attiny_dt_ids[] = {

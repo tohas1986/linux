@@ -67,7 +67,6 @@ properties:
       - gmii
       - sgmii
       - qsgmii
-      - qusgmii
       - tbi
       - rev-mii
       - rmii

@@ -659,7 +659,7 @@ static void sbefifo_collect_async_ffdc(struct sbefifo *sbefifo)
 	}
         ffdc_iov.iov_base = ffdc;
 	ffdc_iov.iov_len = SBEFIFO_MAX_FFDC_SIZE;
-        iov_iter_kvec(&ffdc_iter, ITER_DEST, &ffdc_iov, 1, SBEFIFO_MAX_FFDC_SIZE);
+        iov_iter_kvec(&ffdc_iter, WRITE, &ffdc_iov, 1, SBEFIFO_MAX_FFDC_SIZE);
 	cmd[0] = cpu_to_be32(2);
 	cmd[1] = cpu_to_be32(SBEFIFO_CMD_GET_SBE_FFDC);
 	rc = sbefifo_do_command(sbefifo, cmd, 2, &ffdc_iter);
@@ -756,7 +756,7 @@ int sbefifo_submit(struct device *dev, const __be32 *command, size_t cmd_len,
 	rbytes = (*resp_len) * sizeof(__be32);
 	resp_iov.iov_base = response;
 	resp_iov.iov_len = rbytes;
-        iov_iter_kvec(&resp_iter, ITER_DEST, &resp_iov, 1, rbytes);
+        iov_iter_kvec(&resp_iter, WRITE, &resp_iov, 1, rbytes);
 
 	/* Perform the command */
 	rc = mutex_lock_interruptible(&sbefifo->lock);
@@ -839,7 +839,7 @@ static ssize_t sbefifo_user_read(struct file *file, char __user *buf,
 	/* Prepare iov iterator */
 	resp_iov.iov_base = buf;
 	resp_iov.iov_len = len;
-	iov_iter_init(&resp_iter, ITER_DEST, &resp_iov, 1, len);
+	iov_iter_init(&resp_iter, WRITE, &resp_iov, 1, len);
 
 	/* Perform the command */
 	rc = mutex_lock_interruptible(&sbefifo->lock);
@@ -1026,6 +1026,14 @@ static int sbefifo_probe(struct device *dev)
 	dev_set_drvdata(dev, sbefifo);
 	mutex_init(&sbefifo->lock);
 	sbefifo->timeout_start_rsp_ms = SBEFIFO_TIMEOUT_START_RSP;
+
+	/*
+	 * Try cleaning up the FIFO. If this fails, we still register the
+	 * driver and will try cleaning things up again on the next access.
+	 */
+	rc = sbefifo_cleanup_hw(sbefifo);
+	if (rc && rc != -ESHUTDOWN)
+		dev_err(dev, "Initial HW cleanup failed, will retry later\n");
 
 	/* Create chardev for userspace access */
 	sbefifo->dev.type = &fsi_cdev_type;

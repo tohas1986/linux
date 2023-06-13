@@ -82,8 +82,6 @@ struct debugfs_mount_opts {
 	kuid_t uid;
 	kgid_t gid;
 	umode_t mode;
-	/* Opt_* bitfield. */
-	unsigned int opts;
 };
 
 enum {
@@ -113,7 +111,6 @@ static int debugfs_parse_options(char *data, struct debugfs_mount_opts *opts)
 	kgid_t gid;
 	char *p;
 
-	opts->opts = 0;
 	opts->mode = DEBUGFS_DEFAULT_MODE;
 
 	while ((p = strsep(&data, ",")) != NULL) {
@@ -148,44 +145,24 @@ static int debugfs_parse_options(char *data, struct debugfs_mount_opts *opts)
 		 * but traditionally debugfs has ignored all mount options
 		 */
 		}
-
-		opts->opts |= BIT(token);
 	}
 
 	return 0;
 }
 
-static void _debugfs_apply_options(struct super_block *sb, bool remount)
+static int debugfs_apply_options(struct super_block *sb)
 {
 	struct debugfs_fs_info *fsi = sb->s_fs_info;
 	struct inode *inode = d_inode(sb->s_root);
 	struct debugfs_mount_opts *opts = &fsi->mount_opts;
 
-	/*
-	 * On remount, only reset mode/uid/gid if they were provided as mount
-	 * options.
-	 */
+	inode->i_mode &= ~S_IALLUGO;
+	inode->i_mode |= opts->mode;
 
-	if (!remount || opts->opts & BIT(Opt_mode)) {
-		inode->i_mode &= ~S_IALLUGO;
-		inode->i_mode |= opts->mode;
-	}
+	inode->i_uid = opts->uid;
+	inode->i_gid = opts->gid;
 
-	if (!remount || opts->opts & BIT(Opt_uid))
-		inode->i_uid = opts->uid;
-
-	if (!remount || opts->opts & BIT(Opt_gid))
-		inode->i_gid = opts->gid;
-}
-
-static void debugfs_apply_options(struct super_block *sb)
-{
-	_debugfs_apply_options(sb, false);
-}
-
-static void debugfs_apply_options_remount(struct super_block *sb)
-{
-	_debugfs_apply_options(sb, true);
+	return 0;
 }
 
 static int debugfs_remount(struct super_block *sb, int *flags, char *data)
@@ -198,7 +175,7 @@ static int debugfs_remount(struct super_block *sb, int *flags, char *data)
 	if (err)
 		goto fail;
 
-	debugfs_apply_options_remount(sb);
+	debugfs_apply_options(sb);
 
 fail:
 	return err;

@@ -181,7 +181,6 @@ static int setup_one_atmu(struct ccsr_pci __iomem *pci,
 static bool is_kdump(void)
 {
 	struct device_node *node;
-	bool ret;
 
 	node = of_find_node_by_type(NULL, "memory");
 	if (!node) {
@@ -189,10 +188,7 @@ static bool is_kdump(void)
 		return false;
 	}
 
-	ret = of_property_read_bool(node, "linux,usable-memory");
-	of_node_put(node);
-
-	return ret;
+	return of_property_read_bool(node, "linux,usable-memory");
 }
 
 /* atmu setup for fsl pci/pcie controller */
@@ -943,7 +939,7 @@ u64 fsl_pci_immrbar_base(struct pci_controller *hose)
 	return 0;
 }
 
-#ifdef CONFIG_PPC_E500
+#ifdef CONFIG_E500
 static int mcheck_handle_load(struct pt_regs *regs, u32 inst)
 {
 	unsigned int rd, ra, rb, d;
@@ -1146,6 +1142,7 @@ void __init fsl_pci_assign_primary(void)
 	for_each_matching_node(np, pci_ids) {
 		if (of_device_is_available(np)) {
 			fsl_pci_primary = np;
+			of_node_put(np);
 			return;
 		}
 	}

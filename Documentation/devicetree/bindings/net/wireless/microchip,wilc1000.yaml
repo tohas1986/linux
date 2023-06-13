@@ -20,6 +20,8 @@ properties:
 
   reg: true
 
+  spi-max-frequency: true
+
   interrupts:
     maxItems: 1
 
@@ -49,10 +51,7 @@ required:
   - compatible
   - interrupts
 
-allOf:
-  - $ref: /schemas/spi/spi-peripheral-props.yaml#
-
-unevaluatedProperties: false
+additionalProperties: false
 
 examples:
   - |

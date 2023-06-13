@@ -387,19 +387,19 @@
 			#interrupt-cells = <2>;
 
 			sdc2_off_state: sdc2-off-state {
-				clk-pins {
+				clk {
 					pins = "sdc2_clk";
 					drive-strength = <2>;
 					bias-disable;
 				};
 
-				cmd-pins {
+				cmd {
 					pins = "sdc2_cmd";
 					drive-strength = <2>;
 					bias-pull-up;
 				};
 
-				data-pins {
+				data {
 					pins = "sdc2_data";
 					drive-strength = <2>;
 					bias-pull-up;
@@ -413,13 +413,13 @@
 					bias-disable;
 				};
 
-				cmd-pins-pins {
+				cmd {
 					pins = "sdc2_cmd";
 					drive-strength = <10>;
 					bias-pull-up;
 				};
 
-				data-pins {
+				data {
 					pins = "sdc2_data";
 					drive-strength = <10>;
 					bias-pull-up;
@@ -458,7 +458,7 @@
 		sdhc_1: mmc@4744000 {
 			compatible = "qcom,sm6125-sdhci", "qcom,sdhci-msm-v5";
 			reg = <0x04744000 0x1000>, <0x04745000 0x1000>;
-			reg-names = "hc", "cqhci";
+			reg-names = "hc", "core";
 
 			interrupts = <GIC_SPI 348 IRQ_TYPE_LEVEL_HIGH>,
 				     <GIC_SPI 352 IRQ_TYPE_LEVEL_HIGH>;

@@ -98,7 +98,6 @@ struct ipvl_port {
 	struct sk_buff_head	backlog;
 	int			count;
 	struct ida		ida;
-	netdevice_tracker	dev_tracker;
 };
 
 struct ipvl_skb_cb {

@@ -1,0 +1,639 @@
+/dts-v1/;
+
+#include "aspeed-g5.dtsi"
+#include <dt-bindings/gpio/aspeed-gpio.h>
+#include <dt-bindings/i2c/i2c.h>
+
+/ {
+	model = "Purley BMC";
+	compatible = "intel,purley-bmc", "aspeed,ast2500";
+
+	aliases {
+		serial0 = &uart1;
+		serial1 = &uart2;
+		serial2 = &uart3;
+		serial3 = &uart4;
+		serial4 = &uart5;
+		serial5 = &vuart;
+
+		i2c16 = &i2c_pcie;
+		i2c17 = &i2c_nvme0;
+		i2c18 = &i2c_nvme1;
+		i2c19 = &i2c_nvme2;
+		i2c20 = &i2c_nvme3;
+
+		i2c21 = &i2c_cpld;
+		i2c22 = &i2c_cpu0_vr;
+		i2c23 = &i2c_cpu1_vr;
+		//i2c24 = &i2c_cpu0_abcd;
+		//i2c25 = &i2c_cpu0_efgh;
+		//i2c26 = &i2c_cpu1_abcd;
+		//i2c27 = &i2c_cpu1_efgh;
+	};
+
+	chosen {
+		stdout-path = &uart5;
+		bootargs = "console=ttyS4,115200n8 root=/dev/ram rw earlyrintk";
+	};
+
+	memory@80000000 {
+		reg = <0x80000000 0x20000000>;
+	};
+
+	reserved-memory {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		vga_memory: framebuffer@7f000000 {
+			no-map;
+			reg = <0x7f000000 0x01000000>;
+		};
+
+		video_engine_memory: jpegbuffer {
+			size = <0x02000000>;
+			alignment = <0x01000000>;
+			compatible = "shared-dma-pool";
+			reusable;
+		};
+		ramoops@9eff0000{
+			compatible = "ramoops";
+			reg = <0x9eff0000 0x10000>;
+			record-size = <0x2000>;
+			console-size = <0x2000>;
+		};
+	};
+
+	vga-shared-memory {
+		compatible = "aspeed,ast2500-vga-sharedmem";
+		reg = <0x9ff00000 0x100000>;
+	};
+
+	iio-hwmon {
+		compatible = "iio-hwmon";
+		io-channels = <&adc 0>, <&adc 1>, <&adc 2>, <&adc 3>,
+			<&adc 4>, <&adc 5>, <&adc 6>, <&adc 7>,
+			<&adc 8>, <&adc 9>, <&adc 10>, <&adc 11>,
+			<&adc 12>, <&adc 13>, <&adc 14>, <&adc 15>;
+	};
+
+	leds {
+		compatible = "gpio-leds";
+
+		heartbeat {
+			label = "heartbeat";
+			gpios = <&gpio ASPEED_GPIO(G, 0) GPIO_ACTIVE_LOW>;
+			linux,default-trigger = "timer";
+			active-delay = <100>;
+			inactive-delay = <100>;
+		};
+
+		identify {
+			default-state = "on";
+			gpios = <&gpio ASPEED_GPIO(G, 1) GPIO_ACTIVE_LOW>;
+		};
+
+		status_amber {
+			default-state = "off";
+			gpios = <&gpio ASPEED_GPIO(G, 3) GPIO_ACTIVE_LOW>;
+		};
+
+		status_green {
+			default-state = "keep";
+			gpios = <&gpio ASPEED_GPIO(G, 2) GPIO_ACTIVE_LOW>;
+		};
+	};
+};
+
+&fmc {
+	status = "okay";
+	flash@0 {
+		status = "okay";
+		m25p,fast-read;
+		label = "spi1";
+		partitions {
+			compatible = "fixed-partitions";
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			u-boot@0 {
+				reg = <0x0 0x60000>; // 384KB
+				label = "u-boot";
+			};
+
+			u-boot-env@60000 {
+				reg = <0x60000 0x20000>; // 128KB
+				label = "u-boot-env";
+			};
+
+			kernel@80000 {
+				reg = <0x80000 0x440000>; // 4352KB
+				label = "kernel";
+			};
+
+			rofs@4c0000 {
+				reg = <0x4c0000 0x2000000>; // 32MB
+				label = "rofs";
+			};
+
+			rwfs@24c0000 {
+				reg = <0x24c0000 0x1400000>; // 20MB
+				label = "rwfs";
+			};
+
+			persistent@38C0000 {
+				reg = <0x38C0000 0x640000>; // 6.4MB must end at 0x3f00000
+				label = "persistent";
+			};
+		};
+	};
+	flash@1 {
+		status = "okay";
+		m25p,fast-read;
+		label = "spi2";
+	};
+};
+
+/*
+&espi {
+	status = "okay";
+};
+*/
+
+&jtag {
+	status = "okay";
+};
+
+
+&syscon {
+	/* uart-clock-high-speed; */
+	status = "okay";
+/*
+	misc_control {
+		compatible = "aspeed,bmc-misc";
+		uart_port_debug {
+			offset = <0x2c>;
+			bit-mask = <0x1>;
+			bit-shift = <10>;
+			read-only;
+		};
+	};
+*/
+};
+
+&adc {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_adc0_default &pinctrl_adc1_default
+	 &pinctrl_adc2_default &pinctrl_adc3_default &pinctrl_adc4_default
+	 &pinctrl_adc5_default &pinctrl_adc6_default &pinctrl_adc7_default
+	 &pinctrl_adc8_default &pinctrl_adc9_default &pinctrl_adc10_default
+	 &pinctrl_adc11_default &pinctrl_adc12_default &pinctrl_adc13_default
+	 &pinctrl_adc15_default>;
+};
+
+&gpio {
+	status = "okay";
+	/* Enable GPIOD0 and GPIOD2 pass-through by default */
+	pinctrl-names = "pass-through";
+	pinctrl-0 = <&pinctrl_gpid0_default
+			&pinctrl_gpid2_default>;
+	gpio-line-names =
+	/*A0-A7*/	"A0","A1","ID_BUTTON","BMC_READY","A4","A5","A6","A7",
+	/*B0-B7*/	"B0","B1","B2","B3","TCK_MUX_SEL","B5","POST_COMPLETE","B7",
+	/*C0-C7*/	"FM_BMC_BOARD_SKU_ID0_N","FM_BMC_BOARD_SKU_ID1_N","FM_BMC_BOARD_SKU_ID2_N","FM_BMC_BOARD_SKU_ID3_N","C4","C5","C6","C7",
+	/*D0-D7*/	"POWER_BUTTON","POWER_OUT","RESET_BUTTON","RESET_OUT","NMI_BUTTON","NMI_OUT","D6","D7",
+	/*E0-E7*/	"BMC_RST_I2C_DEV_1","ME_UPDATE_BMC","CPU1_VRHOT","CPU2_VRHOT","CPU1_MEM_ABCD_VRHOT","CPU1_MEM_EFGH_VRHOT","CPU2_MEM_ABCD_VRHOT","CPU2_MEM_EFGH_VRHOT",
+	/*F0-F7*/	"SIO_POWER_GOOD","DEBUG_EN_N","PWR_DEBUG_N","P3VBAT_BRIDGE_EN","F4","F5","PLTRST_N","PRDY_N",
+	/*G0-G7*/	"G0","G1","G2","G3","G4","FM_CLR_CMOS","G6","G7",
+	/*H0-H7*/	"PS_PWROK","PCH_BMC_THERMTRIP","CPU1_MEM_THERM_EVENT","CPU_CATERR","CPU_ERR2","H5","H6","H7",
+	/*I0-I7*/   "I0", "I1", "I2", "I3", "I4", "I5", "I6", "I7",
+	/*J0-J7*/   "J0", "J1", "J2", "J3", "J4", "J5", "J6", "J7",
+	/*K0-K7*/   "K0", "K1", "K2", "K3", "K4", "K5", "K6", "K7",
+	/*L0-L7*/   "L0", "L1", "L2", "L3", "L4", "L5", "L6", "L7",
+	/*M0-M7*/	"RSMRST_N","SYSPWROK","M2","M3","M4","FM_BMC_BOARD_SKU_ID5_N","M6","M7",
+	/*N0-N7*/   "N0", "N1", "N2", "N3", "N4", "N5", "N6", "N7",
+	/*O0-O7*/   "O0", "O1", "O2", "O3", "O4", "O5", "O6", "O7",
+	/*P0-P7*/   "P0", "P1", "P2", "P3", "P4", "P5", "P6", "P7",
+	/*Q0-Q7*/   "Q0", "Q1", "Q2", "Q3", "Q4", "Q5", "Q6", "Q7",
+	/*R0-R7*/	"R0","R1","R2","BIOS_SEL","R4","BAT_SENSE","R6","R7",
+	/*S0-S7*/   "S0", "S1", "S2", "S3", "S4", "S5", "S6", "S7",
+	/*T0-T7*/   "T0", "T1", "T2", "T3", "T4", "T5", "T6", "T7",
+	/*U0-U7*/   "U0", "U1", "U2", "U3", "U4", "U5", "U6", "U7",
+	/*V0-V7*/   "V0", "V1", "V2", "V3", "V4", "V5", "V6", "V7",
+	/*W0-W7*/   "W0", "W1", "W2", "W3", "W4", "W5", "W6", "W7",
+	/*X0-X7*/   "X0", "X1", "X2", "X3", "X4", "X5", "X6", "X7",
+	/*Y0-Y7*/	"SIO_S3","SIO_S5","Y2","SIO_ONCONTROL","Y4","Y5","Y6","Y7",
+	/*Z0-Z7*/   "Z0", "Z1", "Z2", "Z3", "Z4", "Z5", "Z6", "Z7",
+	/*AA0-AA7*/ "AA0", "AA1", "AA2", "AA3", "AA4", "AA5", "AA6", "AA7",
+	/*AB0-AB7*/ "AB0", "AB1", "AB2", "AB3", "AB4", "AB5", "AB6", "AB7",
+	/*AC0-AC7*/ "AC0", "AC1", "AC2", "AC3", "AC4", "AC5", "AC6", "AC7";
+};
+
+&kcs3 {
+	kcs_addr = <0xCA2>;
+	aspeed,lpc-io-reg = <0xca2>;
+	status = "okay";
+};
+
+&kcs4 {
+	kcs_addr = <0xCA4>;
+	aspeed,lpc-io-reg = <0xca4>;
+	status = "okay";
+};
+
+&lpc_sio {
+	status = "okay";
+};
+
+
+&lpc_snoop {
+	snoop-ports = <0x80>;
+	status = "okay";
+};
+
+&mbox {
+	status = "okay";
+};
+
+/**
+ * BIOS flash connected via MUX controlled by GPIO R.3 (BIOS_SEL_N)
+*/
+&spi1 {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_spi1_default>;
+
+	flash@0 {
+		m25p,fast-read;
+		status = "okay";
+	};
+};
+
+/* ttyS0 0x1e783000  Passed to host via SIO -> LPC */
+&uart1 {
+	status = "disabled";
+};
+
+/* ttyS1 0x1e78d000 Passed to host via SIO -> LPC */
+&uart2{
+	status = "disabled";
+};
+
+/* ttyS2 0x1e78e000 */
+&uart3{
+	status = "okay";
+};
+
+/* ttyS3 0x1e78f000 This UART is used to be internally connected to UART1 for SOL function */
+&uart4{
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <>;
+};
+
+/* ttyS4 0x1e784000 This is console UART */
+&uart5 {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <>;
+};
+
+/* ttyS5 0x1e787000 This is host UART sitting on LPC */
+&vuart {
+	status = "disabled";
+};
+
+&uart_routing {
+	status = "okay";
+};
+
+&mac0 {
+	status = "disabled";
+};
+
+&mac1 {
+	status = "okay";
+
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_rgmii2_default &pinctrl_mdio2_default>;
+};
+
+&i2c0 {
+	bus-frequency = <100000>;
+	general-call;
+	aspeed,dma-buf-size = <4095>;
+	aspeed,hw-timeout-ms = <300>;
+	status = "okay";
+};
+
+&i2c1 {
+	bus-frequency = <100000>;
+	aspeed,dma-buf-size = <4095>;
+	aspeed,hw-timeout-ms = <300>;
+	status = "okay";
+
+	i2c-switch@73 {
+		compatible = "nxp,pca9548";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0x73>;
+		i2c-mux-idle-disconnect;
+
+		i2c_pcie: i2c@0 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0>;
+		};
+
+		i2c_nvme0: i2c@1 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <1>;
+		};
+
+		i2c_nvme1: i2c@2 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <2>;
+		};
+
+		i2c_nvme2: i2c@3 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <3>;
+		};
+
+		i2c_nvme3: i2c@4 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <4>;
+		};
+	};
+};
+
+&i2c2 {
+	bus-frequency = <100000>;
+	status = "okay";
+	multi-master;
+	ipmb@10 {
+		compatible = "ipmb-dev";
+		reg = <0x10>;
+		i2c-protocol;
+	};
+};
+
+&i2c3 {
+	bus-frequency = <100000>;
+	aspeed,dma-buf-size = <4095>;
+	aspeed,hw-timeout-ms = <300>;
+	status = "okay";
+};
+
+&i2c4 {
+	bus-frequency = <100000>;
+	aspeed,dma-buf-size = <4095>;
+	aspeed,hw-timeout-ms = <300>;
+	status = "okay";
+
+	tmp75@4c {
+		compatible = "ti,tmp75";
+		reg = <0x4c>;
+	};
+
+	tmp75@4d {
+		compatible = "ti,tmp75";
+		reg = <0x4d>;
+	};
+
+	tmp75@4e {
+		compatible = "ti,tmp75";
+		reg = <0x4e>;
+	};
+
+	i2c-switch_vr {
+		compatible = "nxp,pca9545";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0x71>;
+		i2c-mux-idle-disconnect;
+		interrupt-controller;
+		#interrupt-cells = <2>;
+
+		i2c_cpld: i2c@0 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0>;
+		};
+		i2c_cpu0_vr: i2c@2 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <1>;
+		};
+		i2c_cpu1_vr: i2c@4 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <2>;
+		};
+	};
+};
+
+/*&i2c5 {
+	bus-frequency = <100000>;
+	aspeed,dma-buf-size = <4095>;
+	aspeed,hw-timeout-ms = <300>;
+	status = "okay";
+
+	i2c-switch_dimms {
+		compatible = "nxp,pca9545";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0x72>;
+		i2c-mux-idle-disconnect;
+		interrupt-controller;
+		#interrupt-cells = <2>;
+
+		i2c_cpu0_abcd: i2c@0 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0>;
+		};
+		i2c_cpu0_efgh: i2c@1 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <1>;
+		};
+		i2c_cpu1_abcd: i2c@2 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <2>;
+		};
+		i2c_cpu1_efgh: i2c@3 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <3>;
+		};
+	};
+};*/
+
+&i2c6 {
+	bus-frequency = <100000>;
+	aspeed,dma-buf-size = <4095>;
+	aspeed,hw-timeout-ms = <300>;
+	status = "okay";
+	multi-master;
+
+	ipmb@11 {
+		compatible = "ipmb-dev";
+		reg = <0x11>;
+		i2c-protocol;
+	};
+};
+
+/* HDD_BPB_R */
+&i2c7 {
+	bus-frequency = <100000>;
+	aspeed,dma-buf-size = <4095>;
+	aspeed,hw-timeout-ms = <300>;
+	status = "okay";
+	nct7802-left@28 {
+		compatible = "nuvoton,nct7802";
+		reg = <0x28>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		channel@1 {
+			reg = <1>;
+			sensor-type = "temperature";
+			temperature-mode = "thermistor";
+		};
+		channel@2 {
+			reg = <2>;
+			sensor-type = "temperature";
+			temperature-mode = "thermistor";
+		};
+	};
+
+	fru@0x51 {
+		compatible = "atmel,24c256";
+		reg = <0x51>;
+	};
+};
+
+/* HDD_BPB_R */
+&i2c8 {
+	bus-frequency = <100000>;
+	aspeed,dma-buf-size = <4095>;
+	aspeed,hw-timeout-ms = <300>;
+	status = "okay";
+
+	nct7802-right@28 {
+		compatible = "nuvoton,nct7802";
+		reg = <0x28>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		channel@1 {
+			reg = <1>;
+			sensor-type = "temperature";
+			temperature-mode = "thermistor";
+		};
+		channel@2 {
+			reg = <2>;
+			sensor-type = "temperature";
+			temperature-mode = "thermistor";
+		};
+	};
+};
+
+&i2c11 {
+	bus-frequency = <100000>;
+	aspeed,dma-buf-size = <4095>;
+	aspeed,hw-timeout-ms = <300>;
+	status = "okay";
+	gpio_exp: pca9555@20 {
+		compatible = "nxp,pca9555";
+		reg = <0x20>;
+		#gpio-cells = <2>;
+		gpio-line-names =
+			/*IO0-IO7*/	"","","GLB_RST_WARN_N_R","","JTAG_EN_N","PMBUS_SEL_N","SGPIO_SEL_N","",
+			/*IO10-IO17*/	"BMC_ASSERT_LOCAL_LOCK","","FM_P1_SP3R2","FM_P1_SP3R1","FM_CPU1_IBMC_THERMTRIP_R_N","FM_CPU1_PRESENT_BMC_N","BMC_PCH_PWRBTN_SIO_OUT_N","BMC_ASSERT_PWR_BTN";
+		line_pmbus_sel_n {
+			gpio-hog;
+			gpios = <5 0>;
+			output-low;
+		};
+	};
+};
+
+&i2c12 {
+	bus-frequency = <100000>;
+	aspeed,dma-buf-size = <4095>;
+	aspeed,hw-timeout-ms = <300>;
+	status = "okay";
+};
+
+&pwm_tacho {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_pwm0_default &pinctrl_pwm1_default>;
+
+	fan@0 {
+		reg = <0x00>;
+		aspeed,fan-tach-ch = /bits/ 8 <0x00>;
+	};
+	fan@1 {
+		reg = <0x01>;
+		aspeed,fan-tach-ch = /bits/ 8 <0x01>;
+	};
+
+};
+
+/*
+&timer {
+*/
+
+/*
+ *	Available settings:
+ *	fttmr010,pwm-outputs = <5>, <6>, <7>, <8>;
+ *	pinctrl-0 = <&pinctrl_timer5_default &pinctrl_timer6_default
+ *			&pinctrl_timer7_default &pinctrl_timer8_default>;
+ */
+
+/*
+	fttmr010,pwm-outputs = <5>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_timer5_default>;
+	#pwm-cells = <3>;
+	status = "okay";
+};
+*/
+
+&video {
+	status = "okay";
+	memory-region = <&video_engine_memory>;
+};
+
+&vhub {
+	status = "okay";
+};
+
+/*
+&ehci0 {
+	status = "okay";
+};
+
+&ehci1 {
+	status = "okay";
+};
+
+&uhci {
+	status = "okay";
+};
+*/
+
+&rtc {
+	status = "okay";
+};
+
+&peci0 {
+	status = "okay";
+};

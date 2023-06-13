@@ -488,8 +488,6 @@ static void __init init_affinity_node(int cbe)
 				avoid_ph = vic_dn->phandle;
 			}
 
-			of_node_put(vic_dn);
-
 			list_add_tail(&spu->aff_list, &last_spu->aff_list);
 			last_spu = spu;
 			break;

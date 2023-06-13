@@ -772,7 +772,7 @@ construct_skb:
 static void
 ice_clean_xdp_tx_buf(struct ice_tx_ring *xdp_ring, struct ice_tx_buf *tx_buf)
 {
-	page_frag_free(tx_buf->raw_buf);
+	xdp_return_frame((struct xdp_frame *)tx_buf->raw_buf);
 	xdp_ring->xdp_tx_active--;
 	dma_unmap_single(xdp_ring->dev, dma_unmap_addr(tx_buf, dma),
 			 dma_unmap_len(tx_buf, len), DMA_TO_DEVICE);
@@ -789,7 +789,6 @@ static void ice_clean_xdp_irq_zc(struct ice_tx_ring *xdp_ring)
 	struct ice_tx_desc *tx_desc;
 	u16 cnt = xdp_ring->count;
 	struct ice_tx_buf *tx_buf;
-	u16 completed_frames = 0;
 	u16 xsk_frames = 0;
 	u16 last_rs;
 	int i;
@@ -799,21 +798,19 @@ static void ice_clean_xdp_irq_zc(struct ice_tx_ring *xdp_ring)
 	if ((tx_desc->cmd_type_offset_bsz &
 	    cpu_to_le64(ICE_TX_DESC_DTYPE_DESC_DONE))) {
 		if (last_rs >= ntc)
-			completed_frames = last_rs - ntc + 1;
+			xsk_frames = last_rs - ntc + 1;
 		else
-			completed_frames = last_rs + cnt - ntc + 1;
+			xsk_frames = last_rs + cnt - ntc + 1;
 	}
 
-	if (!completed_frames)
+	if (!xsk_frames)
 		return;
 
-	if (likely(!xdp_ring->xdp_tx_active)) {
-		xsk_frames = completed_frames;
+	if (likely(!xdp_ring->xdp_tx_active))
 		goto skip;
-	}
 
 	ntc = xdp_ring->next_to_clean;
-	for (i = 0; i < completed_frames; i++) {
+	for (i = 0; i < xsk_frames; i++) {
 		tx_buf = &xdp_ring->tx_buf[ntc];
 
 		if (tx_buf->raw_buf) {
@@ -829,7 +826,7 @@ static void ice_clean_xdp_irq_zc(struct ice_tx_ring *xdp_ring)
 	}
 skip:
 	tx_desc->cmd_type_offset_bsz = 0;
-	xdp_ring->next_to_clean += completed_frames;
+	xdp_ring->next_to_clean += xsk_frames;
 	if (xdp_ring->next_to_clean >= cnt)
 		xdp_ring->next_to_clean -= cnt;
 	if (xsk_frames)

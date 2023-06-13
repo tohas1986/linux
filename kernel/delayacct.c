@@ -214,22 +214,13 @@ void __delayacct_freepages_end(void)
 		      &current->delays->freepages_count);
 }
 
-void __delayacct_thrashing_start(bool *in_thrashing)
+void __delayacct_thrashing_start(void)
 {
-	*in_thrashing = !!current->in_thrashing;
-	if (*in_thrashing)
-		return;
-
-	current->in_thrashing = 1;
 	current->delays->thrashing_start = local_clock();
 }
 
-void __delayacct_thrashing_end(bool *in_thrashing)
+void __delayacct_thrashing_end(void)
 {
-	if (*in_thrashing)
-		return;
-
-	current->in_thrashing = 0;
 	delayacct_end(&current->delays->lock,
 		      &current->delays->thrashing_start,
 		      &current->delays->thrashing_delay,

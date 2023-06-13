@@ -122,11 +122,6 @@ nfs4_label_init_security(struct inode *dir, struct dentry *dentry,
 	if (nfs_server_capable(dir, NFS_CAP_SECURITY_LABEL) == 0)
 		return NULL;
 
-	label->lfs = 0;
-	label->pi = 0;
-	label->len = 0;
-	label->label = NULL;
-
 	err = security_dentry_init_security(dentry, sattr->ia_mode,
 				&dentry->d_name, NULL,
 				(void **)&label->label, &label->len);
@@ -421,8 +416,8 @@ static int nfs4_delay_killable(long *timeout)
 {
 	might_sleep();
 
-	__set_current_state(TASK_KILLABLE|TASK_FREEZABLE_UNSAFE);
-	schedule_timeout(nfs4_update_delay(timeout));
+	freezable_schedule_timeout_killable_unsafe(
+		nfs4_update_delay(timeout));
 	if (!__fatal_signal_pending(current))
 		return 0;
 	return -EINTR;
@@ -432,8 +427,7 @@ static int nfs4_delay_interruptible(long *timeout)
 {
 	might_sleep();
 
-	__set_current_state(TASK_INTERRUPTIBLE|TASK_FREEZABLE_UNSAFE);
-	schedule_timeout(nfs4_update_delay(timeout));
+	freezable_schedule_timeout_interruptible_unsafe(nfs4_update_delay(timeout));
 	if (!signal_pending(current))
 		return 0;
 	return __fatal_signal_pending(current) ? -EINTR :-ERESTARTSYS;
@@ -2131,18 +2125,18 @@ static struct nfs4_opendata *nfs4_open_recoverdata_alloc(struct nfs_open_context
 }
 
 static int nfs4_open_recover_helper(struct nfs4_opendata *opendata,
-				    fmode_t fmode)
+		fmode_t fmode)
 {
 	struct nfs4_state *newstate;
-	struct nfs_server *server = NFS_SB(opendata->dentry->d_sb);
-	int openflags = opendata->o_arg.open_flags;
 	int ret;
 
 	if (!nfs4_mode_match_open_stateid(opendata->state, fmode))
 		return 0;
+	opendata->o_arg.open_flags = 0;
 	opendata->o_arg.fmode = fmode;
-	opendata->o_arg.share_access =
-		nfs4_map_atomic_open_share(server, fmode, openflags);
+	opendata->o_arg.share_access = nfs4_map_atomic_open_share(
+			NFS_SB(opendata->dentry->d_sb),
+			fmode, 0);
 	memset(&opendata->o_res, 0, sizeof(opendata->o_res));
 	memset(&opendata->c_res, 0, sizeof(opendata->c_res));
 	nfs4_init_opendata_res(opendata);
@@ -2724,15 +2718,10 @@ static int _nfs4_open_expired(struct nfs_open_context *ctx, struct nfs4_state *s
 	struct nfs4_opendata *opendata;
 	int ret;
 
-	opendata = nfs4_open_recoverdata_alloc(ctx, state, NFS4_OPEN_CLAIM_FH);
+	opendata = nfs4_open_recoverdata_alloc(ctx, state,
+			NFS4_OPEN_CLAIM_FH);
 	if (IS_ERR(opendata))
 		return PTR_ERR(opendata);
-	/*
-	 * We're not recovering a delegation, so ask for no delegation.
-	 * Otherwise the recovery thread could deadlock with an outstanding
-	 * delegation return.
-	 */
-	opendata->o_arg.open_flags = O_DIRECT;
 	ret = nfs4_open_recover(opendata, state);
 	if (ret == -ESTALE)
 		d_drop(ctx->dentry);
@@ -3806,7 +3795,7 @@ nfs4_atomic_open(struct inode *dir, struct nfs_open_context *ctx,
 		int open_flags, struct iattr *attr, int *opened)
 {
 	struct nfs4_state *state;
-	struct nfs4_label l, *label;
+	struct nfs4_label l = {0, 0, 0, NULL}, *label = NULL;
 
 	label = nfs4_label_init_security(dir, ctx->dentry, attr, &l);
 
@@ -3961,7 +3950,7 @@ static void test_fs_location_for_trunking(struct nfs4_fs_location *location,
 
 	for (i = 0; i < location->nservers; i++) {
 		struct nfs4_string *srv_loc = &location->servers[i];
-		struct sockaddr_storage addr;
+		struct sockaddr addr;
 		size_t addrlen;
 		struct xprt_create xprt_args = {
 			.ident = 0,
@@ -3984,7 +3973,7 @@ static void test_fs_location_for_trunking(struct nfs4_fs_location *location,
 						clp->cl_net, server->port);
 		if (!addrlen)
 			return;
-		xprt_args.dstaddr = (struct sockaddr *)&addr;
+		xprt_args.dstaddr = &addr;
 		xprt_args.addrlen = addrlen;
 		servername = kmalloc(srv_loc->len + 1, GFP_KERNEL);
 		if (!servername)
@@ -4023,7 +4012,7 @@ static int _nfs4_discover_trunking(struct nfs_server *server,
 
 	page = alloc_page(GFP_KERNEL);
 	if (!page)
-		goto out_put_cred;
+		return -ENOMEM;
 	locations = kmalloc(sizeof(struct nfs4_fs_locations), GFP_KERNEL);
 	if (!locations)
 		goto out_free;
@@ -4045,8 +4034,6 @@ out_free_2:
 	kfree(locations);
 out_free:
 	__free_page(page);
-out_put_cred:
-	put_cred(cred);
 	return status;
 }
 
@@ -4694,7 +4681,7 @@ nfs4_proc_create(struct inode *dir, struct dentry *dentry, struct iattr *sattr,
 		 int flags)
 {
 	struct nfs_server *server = NFS_SERVER(dir);
-	struct nfs4_label l, *ilabel;
+	struct nfs4_label l, *ilabel = NULL;
 	struct nfs_open_context *ctx;
 	struct nfs4_state *state;
 	int status = 0;
@@ -5045,7 +5032,7 @@ static int nfs4_proc_symlink(struct inode *dir, struct dentry *dentry,
 	struct nfs4_exception exception = {
 		.interruptible = true,
 	};
-	struct nfs4_label l, *label;
+	struct nfs4_label l, *label = NULL;
 	int err;
 
 	label = nfs4_label_init_security(dir, dentry, sattr, &l);
@@ -5086,7 +5073,7 @@ static int nfs4_proc_mkdir(struct inode *dir, struct dentry *dentry,
 	struct nfs4_exception exception = {
 		.interruptible = true,
 	};
-	struct nfs4_label l, *label;
+	struct nfs4_label l, *label = NULL;
 	int err;
 
 	label = nfs4_label_init_security(dir, dentry, sattr, &l);
@@ -5205,7 +5192,7 @@ static int nfs4_proc_mknod(struct inode *dir, struct dentry *dentry,
 	struct nfs4_exception exception = {
 		.interruptible = true,
 	};
-	struct nfs4_label l, *label;
+	struct nfs4_label l, *label = NULL;
 	int err;
 
 	label = nfs4_label_init_security(dir, dentry, sattr, &l);
@@ -6620,7 +6607,7 @@ static void nfs4_delegreturn_prepare(struct rpc_task *task, void *data)
 	struct nfs4_delegreturndata *d_data;
 	struct pnfs_layout_hdr *lo;
 
-	d_data = data;
+	d_data = (struct nfs4_delegreturndata *)data;
 
 	if (!d_data->lr.roc && nfs4_wait_on_layoutreturn(d_data->inode, task)) {
 		nfs4_sequence_done(task, &d_data->res.seq_res);
@@ -7421,8 +7408,7 @@ nfs4_retry_setlk_simple(struct nfs4_state *state, int cmd,
 		status = nfs4_proc_setlk(state, cmd, request);
 		if ((status != -EAGAIN) || IS_SETLK(cmd))
 			break;
-		__set_current_state(TASK_INTERRUPTIBLE|TASK_FREEZABLE);
-		schedule_timeout(timeout);
+		freezable_schedule_timeout_interruptible(timeout);
 		timeout *= 2;
 		timeout = min_t(unsigned long, NFS4_LOCK_MAXTIMEOUT, timeout);
 		status = -ERESTARTSYS;
@@ -7490,8 +7476,10 @@ nfs4_retry_setlk(struct nfs4_state *state, int cmd, struct file_lock *request)
 			break;
 
 		status = -ERESTARTSYS;
-		wait_woken(&waiter.wait, TASK_INTERRUPTIBLE|TASK_FREEZABLE,
+		freezer_do_not_count();
+		wait_woken(&waiter.wait, TASK_INTERRUPTIBLE,
 			   NFS4_LOCK_MAXTIMEOUT);
+		freezer_count();
 	} while (!signalled());
 
 	remove_wait_queue(q, &waiter.wait);
@@ -8914,7 +8902,7 @@ int nfs4_proc_exchange_id(struct nfs_client *clp, const struct cred *cred)
 void nfs4_test_session_trunk(struct rpc_clnt *clnt, struct rpc_xprt *xprt,
 			    void *data)
 {
-	struct nfs4_add_xprt_data *adata = data;
+	struct nfs4_add_xprt_data *adata = (struct nfs4_add_xprt_data *)data;
 	struct rpc_task *task;
 	int status;
 

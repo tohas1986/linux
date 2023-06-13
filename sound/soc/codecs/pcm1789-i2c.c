@@ -27,9 +27,11 @@ static int pcm1789_i2c_probe(struct i2c_client *client)
 	return pcm1789_common_init(&client->dev, regmap);
 }
 
-static void pcm1789_i2c_remove(struct i2c_client *client)
+static int pcm1789_i2c_remove(struct i2c_client *client)
 {
 	pcm1789_common_exit(&client->dev);
+
+	return 0;
 }
 
 #ifdef CONFIG_OF

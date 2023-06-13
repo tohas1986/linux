@@ -39,8 +39,12 @@ static const unsigned short normal_i2c[] = { 0x58, 0x5C, I2C_CLIENT_END };
 #define ADT7462_REG_FAN_MIN_BASE_ADDR		0x78
 #define ADT7462_REG_FAN_MIN_MAX_ADDR		0x7F
 
+#define ADT7462_REG_CFG1			0x01
+#define		ADT7462_SETUP_COMPLETE_MASK	0x20
+
 #define ADT7462_REG_CFG2			0x02
-#define		ADT7462_FSPD_MASK		0x20
+#define		ADT7462_FSPD_MASK		0x24
+#define		ADT7462_PWM_FREQ_MODE_MASK      0x04
 
 #define ADT7462_REG_PWM_BASE_ADDR		0xAA
 #define ADT7462_REG_PWM_MAX_ADDR		0xAD
@@ -56,8 +60,15 @@ static const unsigned short normal_i2c[] = { 0x58, 0x5C, I2C_CLIENT_END };
 #define		ADT7462_PWM_RANGE_SHIFT		4
 #define ADT7462_REG_PWM_CFG_BASE_ADDR		0x21
 #define ADT7462_REG_PWM_CFG_MAX_ADDR		0x24
+
+#define ADT7462_REG_PWM1_CFG                0x21
+#define ADT7462_REG_PWM2_CFG                0x22
+#define ADT7462_REG_PWM3_CFG                0x23
+#define ADT7462_REG_PWM4_CFG                0x24
+
 #define		ADT7462_PWM_CHANNEL_MASK	0xE0
 #define		ADT7462_PWM_CHANNEL_SHIFT	5
+#define		ADT7462_SPINUP_TIMEOUT_MASK     0x07
 
 #define ADT7462_REG_PIN_CFG_BASE_ADDR		0x10
 #define ADT7462_REG_PIN_CFG_MAX_ADDR		0x13
@@ -83,6 +94,10 @@ static const unsigned short normal_i2c[] = { 0x58, 0x5C, I2C_CLIENT_END };
 #define		ADT7462_PIN25_VOLT_INPUT	0x20
 #define		ADT7462_PIN28_SHIFT		4	/* cfg3 */
 #define		ADT7462_PIN28_VOLT		0x5
+
+#define ADT7462_REG_EASY_CONFIG                 0x14
+
+#define ADT7462_REG_FAN_PRESENCE                0x1D
 
 #define ADT7462_REG_ALARM1			0xB8
 #define	ADT7462_LT_ALARM			0x02
@@ -203,8 +218,11 @@ struct adt7462_data {
 	u8			temp_max[ADT7462_TEMP_COUNT];
 	u16			fan[ADT7462_FAN_COUNT];
 	u8			fan_enabled;
+	u8			fan_presence;
 	u8			fan_min[ADT7462_FAN_COUNT];
+	u8			cfg1;
 	u8			cfg2;
+	u8			easy_config;
 	u8			pwm[ADT7462_PWM_COUNT];
 	u8			pin_cfg[ADT7462_PIN_CFG_REG_COUNT];
 	u8			voltages[ADT7462_VOLT_COUNT];
@@ -700,6 +718,9 @@ static struct adt7462_data *adt7462_update_device(struct device *dev)
 	data->fan_enabled = i2c_smbus_read_byte_data(client,
 					ADT7462_REG_FAN_ENABLE);
 
+	data->fan_presence = i2c_smbus_read_byte_data(client,
+					ADT7462_REG_FAN_PRESENCE);
+
 	for (i = 0; i < ADT7462_PWM_COUNT; i++)
 		data->pwm[i] = i2c_smbus_read_byte_data(client,
 						ADT7462_REG_PWM(i));
@@ -765,7 +786,12 @@ no_sensor_update:
 
 	data->pwm_max = i2c_smbus_read_byte_data(client, ADT7462_REG_PWM_MAX);
 
+	data->cfg1 = i2c_smbus_read_byte_data(client, ADT7462_REG_CFG1);
+
 	data->cfg2 = i2c_smbus_read_byte_data(client, ADT7462_REG_CFG2);
+
+	data->easy_config = i2c_smbus_read_byte_data(client,
+						ADT7462_REG_EASY_CONFIG);
 
 	data->limits_last_updated = local_jiffies;
 	data->limits_valid = 1;
@@ -1049,6 +1075,117 @@ static ssize_t fan_show(struct device *dev, struct device_attribute *devattr,
 		       FAN_PERIOD_TO_RPM(data->fan[attr->index]));
 }
 
+static ssize_t fan_tach_show(struct device *dev,
+			      struct device_attribute *devattr,
+			      char *buf)
+{
+	struct sensor_device_attribute *attr = to_sensor_dev_attr(devattr);
+	struct adt7462_data *data = adt7462_update_device(dev);
+
+	return sprintf(buf, "%d\n", fan_enabled(data, attr->index) ? 1 : 0);
+}
+
+static ssize_t fan_tach_store(struct device *dev,
+			       struct device_attribute *devattr,
+			       const char *buf, size_t count)
+{
+	struct sensor_device_attribute *attr = to_sensor_dev_attr(devattr);
+	struct adt7462_data *data = dev_get_drvdata(dev);
+	struct i2c_client *client = data->client;
+	long temp;
+	u8   reg;
+
+	if (kstrtol(buf, 10, &temp))
+		return -EINVAL;
+
+	mutex_lock(&data->lock);
+	reg = i2c_smbus_read_byte_data(client, ADT7462_REG_FAN_ENABLE);
+
+	if (temp)
+		reg |= (1 << attr->index);
+	else
+		reg &= (~(1 << attr->index));
+	data->fan_enabled = reg;
+
+	i2c_smbus_write_byte_data(client, ADT7462_REG_FAN_ENABLE, reg);
+	mutex_unlock(&data->lock);
+
+	return count;
+}
+
+static ssize_t fan_presence_show(struct device *dev,
+				  struct device_attribute *devattr,
+				  char *buf)
+{
+	struct sensor_device_attribute *attr = to_sensor_dev_attr(devattr);
+	struct adt7462_data *data = adt7462_update_device(dev);
+
+	return sprintf(buf, "%d\n", ((data->fan_presence >> attr->index) & 1) ? 1 : 0);
+}
+
+static ssize_t fan_presence_store(struct device *dev,
+				   struct device_attribute *devattr,
+				   const char *buf, size_t count)
+{
+	struct sensor_device_attribute *attr = to_sensor_dev_attr(devattr);
+	struct adt7462_data *data = dev_get_drvdata(dev);
+	struct i2c_client *client = data->client;
+	long temp;
+	u8   reg;
+
+	if (kstrtol(buf, 10, &temp))
+		return -EINVAL;
+
+	mutex_lock(&data->lock);
+	reg = i2c_smbus_read_byte_data(client, ADT7462_REG_FAN_PRESENCE);
+
+	if (temp)
+		reg |= (1 << attr->index);
+	else
+		reg &= (~(1 << attr->index));
+	data->fan_presence = reg;
+
+	i2c_smbus_write_byte_data(client, ADT7462_REG_FAN_PRESENCE, reg);
+	mutex_unlock(&data->lock);
+
+	return count;
+}
+
+static ssize_t setup_complete_show(struct device *dev,
+				    struct device_attribute *devattr,
+				    char *buf)
+{
+	struct adt7462_data *data = adt7462_update_device(dev);
+
+	return sprintf(buf, "%d\n", (data->cfg1 & ADT7462_SETUP_COMPLETE_MASK ? 1 : 0));
+}
+
+static ssize_t setup_complete_store(struct device *dev,
+				     struct device_attribute *devattr,
+				     const char *buf,
+				     size_t count)
+{
+	struct adt7462_data *data = dev_get_drvdata(dev);
+	struct i2c_client *client = data->client;
+	long temp;
+	u8 reg;
+
+	if (kstrtol(buf, 10, &temp))
+		return -EINVAL;
+
+	mutex_lock(&data->lock);
+	reg = i2c_smbus_read_byte_data(client, ADT7462_REG_CFG1);
+	if (temp)
+		reg |= ADT7462_SETUP_COMPLETE_MASK;
+	else
+		reg &= ~ADT7462_SETUP_COMPLETE_MASK;
+	data->cfg1 = reg;
+	i2c_smbus_write_byte_data(client, ADT7462_REG_CFG1, reg);
+	mutex_unlock(&data->lock);
+
+	return count;
+}
+
 static ssize_t force_pwm_max_show(struct device *dev,
 				  struct device_attribute *devattr, char *buf)
 {
@@ -1064,6 +1201,7 @@ static ssize_t force_pwm_max_store(struct device *dev,
 	struct i2c_client *client = data->client;
 	long temp;
 	u8 reg;
+    u8 set = 0xf0;
 
 	if (kstrtol(buf, 10, &temp))
 		return -EINVAL;
@@ -1076,6 +1214,81 @@ static ssize_t force_pwm_max_store(struct device *dev,
 		reg &= ~ADT7462_FSPD_MASK;
 	data->cfg2 = reg;
 	i2c_smbus_write_byte_data(client, ADT7462_REG_CFG2, reg);
+	
+    i2c_smbus_write_byte_data(client, ADT7462_REG_PWM1_CFG, set);
+    i2c_smbus_write_byte_data(client, ADT7462_REG_PWM2_CFG, set);
+    i2c_smbus_write_byte_data(client, ADT7462_REG_PWM3_CFG, set);
+    i2c_smbus_write_byte_data(client, ADT7462_REG_PWM4_CFG, set);
+
+    mutex_unlock(&data->lock);
+
+	return count;
+}
+
+static ssize_t pwm_freq_mode_show(struct device *dev,
+				   struct device_attribute *devattr,
+				   char *buf)
+{
+	struct adt7462_data *data = adt7462_update_device(dev);
+
+	return sprintf(buf, "%d\n", (data->cfg2 & ADT7462_PWM_FREQ_MODE_MASK ? 1 : 0));
+}
+
+static ssize_t pwm_freq_mode_store(struct device *dev,
+				    struct device_attribute *devattr,
+				    const char *buf,
+				    size_t count)
+{
+	struct adt7462_data *data = dev_get_drvdata(dev);
+	struct i2c_client *client = data->client;
+	long temp;
+	u8 reg;
+
+	if (kstrtol(buf, 10, &temp))
+		return -EINVAL;
+
+	mutex_lock(&data->lock);
+	reg = i2c_smbus_read_byte_data(client, ADT7462_REG_CFG2);
+	if (temp)
+		reg |= ADT7462_PWM_FREQ_MODE_MASK;
+	else
+		reg &= ~ADT7462_PWM_FREQ_MODE_MASK;
+
+	data->cfg2 = reg;
+	i2c_smbus_write_byte_data(client, ADT7462_REG_CFG2, reg);
+	mutex_unlock(&data->lock);
+
+	return count;
+}
+
+static ssize_t easy_config_show(struct device *dev,
+				 struct device_attribute *devattr,
+				 char *buf)
+{
+	struct adt7462_data *data = adt7462_update_device(dev);
+
+	return sprintf(buf, "%d\n", data->easy_config);
+}
+
+static ssize_t easy_config_store(struct device *dev,
+				  struct device_attribute *devattr,
+				  const char *buf,
+				  size_t count)
+{
+	struct adt7462_data *data = dev_get_drvdata(dev);
+	struct i2c_client *client = data->client;
+	long temp;
+
+	if (kstrtol(buf, 10, &temp))
+		return -EINVAL;
+	/* Only 1 bit needs to be set and set bit should be below bit 5. */
+
+	if (((temp & (temp - 1)) != 0) || (temp > 16))
+		return -EINVAL;
+
+	mutex_lock(&data->lock);
+	data->easy_config = temp;
+	i2c_smbus_write_byte_data(client, ADT7462_REG_EASY_CONFIG, temp);
 	mutex_unlock(&data->lock);
 
 	return count;
@@ -1339,6 +1552,56 @@ static ssize_t pwm_auto_store(struct device *dev,
 	}
 }
 
+static ssize_t pwm_spinup_timeout_show(struct device *dev,
+					struct device_attribute *devattr,
+					char *buf)
+{
+	struct sensor_device_attribute *attr = to_sensor_dev_attr(devattr);
+	struct adt7462_data *data = adt7462_update_device(dev);
+	int cfg = data->pwm_cfg[attr->index] & ADT7462_SPINUP_TIMEOUT_MASK;
+
+	return sprintf(buf, "%d\n", cfg);
+
+}
+
+static void pwm_spinup_timeout_reg_store(struct i2c_client *client,
+					  struct adt7462_data *data,
+					  int which,
+					  int value)
+{
+	int temp = data->pwm_cfg[which] & ~ADT7462_SPINUP_TIMEOUT_MASK;
+
+	temp |= value;
+
+	mutex_lock(&data->lock);
+	data->pwm_cfg[which] = temp;
+	i2c_smbus_write_byte_data(client, ADT7462_REG_PWM_CFG(which), temp);
+	mutex_unlock(&data->lock);
+}
+
+static ssize_t pwm_spinup_timeout_store(struct device *dev,
+					 struct device_attribute *devattr,
+					 const char *buf,
+					 size_t count)
+{
+	struct sensor_device_attribute *attr = to_sensor_dev_attr(devattr);
+	struct adt7462_data *data = dev_get_drvdata(dev);
+	struct i2c_client *client = data->client;
+	long temp;
+
+	if (kstrtol(buf, 10, &temp))
+		return -EINVAL;
+	/* Only 3 bits are valid. */
+	if (temp > 7)
+		return -EINVAL;
+
+	pwm_spinup_timeout_reg_store(client, data, attr->index, temp);
+
+	return count;
+}
+
+
+
 static ssize_t pwm_auto_temp_show(struct device *dev,
 				  struct device_attribute *devattr, char *buf)
 {
@@ -1540,7 +1803,31 @@ static SENSOR_DEVICE_ATTR_RO(fan7_alarm, alarm,
 static SENSOR_DEVICE_ATTR_RO(fan8_alarm, alarm,
 			     ADT7462_ALARM4 | ADT7462_F7_ALARM);
 
+static SENSOR_DEVICE_ATTR_RW(fan1_tach_enable, fan_tach, 0);
+static SENSOR_DEVICE_ATTR_RW(fan2_tach_enable, fan_tach, 1);
+static SENSOR_DEVICE_ATTR_RW(fan3_tach_enable, fan_tach, 2);
+static SENSOR_DEVICE_ATTR_RW(fan4_tach_enable, fan_tach, 3);
+static SENSOR_DEVICE_ATTR_RW(fan5_tach_enable, fan_tach, 4);
+static SENSOR_DEVICE_ATTR_RW(fan6_tach_enable, fan_tach, 5);
+static SENSOR_DEVICE_ATTR_RW(fan7_tach_enable, fan_tach, 6);
+static SENSOR_DEVICE_ATTR_RW(fan8_tach_enable, fan_tach, 7);
+
+static SENSOR_DEVICE_ATTR_RW(fan1_presence, fan_presence, 0);
+static SENSOR_DEVICE_ATTR_RW(fan2_presence, fan_presence, 1);
+static SENSOR_DEVICE_ATTR_RW(fan3_presence, fan_presence, 2);
+static SENSOR_DEVICE_ATTR_RW(fan4_presence, fan_presence, 3);
+static SENSOR_DEVICE_ATTR_RW(fan5_presence, fan_presence, 4);
+static SENSOR_DEVICE_ATTR_RW(fan6_presence, fan_presence, 5);
+static SENSOR_DEVICE_ATTR_RW(fan7_presence, fan_presence, 6);
+static SENSOR_DEVICE_ATTR_RW(fan8_presence, fan_presence, 7);
+
 static SENSOR_DEVICE_ATTR_RW(force_pwm_max, force_pwm_max, 0);
+
+static SENSOR_DEVICE_ATTR_RW(setup_complete, setup_complete, 0);
+
+static SENSOR_DEVICE_ATTR_RW(pwm_freq_mode, pwm_freq_mode, 0);
+
+static SENSOR_DEVICE_ATTR_RW(easy_config, easy_config, 0);
 
 static SENSOR_DEVICE_ATTR_RW(pwm1, pwm, 0);
 static SENSOR_DEVICE_ATTR_RW(pwm2, pwm, 1);
@@ -1581,6 +1868,11 @@ static SENSOR_DEVICE_ATTR_RW(pwm1_enable, pwm_auto, 0);
 static SENSOR_DEVICE_ATTR_RW(pwm2_enable, pwm_auto, 1);
 static SENSOR_DEVICE_ATTR_RW(pwm3_enable, pwm_auto, 2);
 static SENSOR_DEVICE_ATTR_RW(pwm4_enable, pwm_auto, 3);
+
+static SENSOR_DEVICE_ATTR_RW(pwm1_spinup_timeout, pwm_spinup_timeout, 0);
+static SENSOR_DEVICE_ATTR_RW(pwm2_spinup_timeout, pwm_spinup_timeout, 1);
+static SENSOR_DEVICE_ATTR_RW(pwm3_spinup_timeout, pwm_spinup_timeout, 2);
+static SENSOR_DEVICE_ATTR_RW(pwm4_spinup_timeout, pwm_spinup_timeout, 3);
 
 static SENSOR_DEVICE_ATTR_RW(pwm1_auto_channels_temp, pwm_auto_temp, 0);
 static SENSOR_DEVICE_ATTR_RW(pwm2_auto_channels_temp, pwm_auto_temp, 1);
@@ -1710,11 +2002,35 @@ static struct attribute *adt7462_attrs[] = {
 	&sensor_dev_attr_fan7_alarm.dev_attr.attr,
 	&sensor_dev_attr_fan8_alarm.dev_attr.attr,
 
+	&sensor_dev_attr_fan1_tach_enable.dev_attr.attr,
+	&sensor_dev_attr_fan2_tach_enable.dev_attr.attr,
+	&sensor_dev_attr_fan3_tach_enable.dev_attr.attr,
+	&sensor_dev_attr_fan4_tach_enable.dev_attr.attr,
+	&sensor_dev_attr_fan5_tach_enable.dev_attr.attr,
+	&sensor_dev_attr_fan6_tach_enable.dev_attr.attr,
+	&sensor_dev_attr_fan7_tach_enable.dev_attr.attr,
+	&sensor_dev_attr_fan8_tach_enable.dev_attr.attr,
+
+	&sensor_dev_attr_fan1_presence.dev_attr.attr,
+	&sensor_dev_attr_fan2_presence.dev_attr.attr,
+	&sensor_dev_attr_fan3_presence.dev_attr.attr,
+	&sensor_dev_attr_fan4_presence.dev_attr.attr,
+	&sensor_dev_attr_fan5_presence.dev_attr.attr,
+	&sensor_dev_attr_fan6_presence.dev_attr.attr,
+	&sensor_dev_attr_fan7_presence.dev_attr.attr,
+	&sensor_dev_attr_fan8_presence.dev_attr.attr,
+
+
 	&sensor_dev_attr_force_pwm_max.dev_attr.attr,
+	&sensor_dev_attr_pwm_freq_mode.dev_attr.attr,
 	&sensor_dev_attr_pwm1.dev_attr.attr,
 	&sensor_dev_attr_pwm2.dev_attr.attr,
 	&sensor_dev_attr_pwm3.dev_attr.attr,
 	&sensor_dev_attr_pwm4.dev_attr.attr,
+
+	&sensor_dev_attr_setup_complete.dev_attr.attr,
+
+	&sensor_dev_attr_easy_config.dev_attr.attr,
 
 	&sensor_dev_attr_pwm1_auto_point1_pwm.dev_attr.attr,
 	&sensor_dev_attr_pwm2_auto_point1_pwm.dev_attr.attr,
@@ -1751,6 +2067,11 @@ static struct attribute *adt7462_attrs[] = {
 	&sensor_dev_attr_pwm3_enable.dev_attr.attr,
 	&sensor_dev_attr_pwm4_enable.dev_attr.attr,
 
+	&sensor_dev_attr_pwm1_spinup_timeout.dev_attr.attr,
+	&sensor_dev_attr_pwm2_spinup_timeout.dev_attr.attr,
+	&sensor_dev_attr_pwm3_spinup_timeout.dev_attr.attr,
+	&sensor_dev_attr_pwm4_spinup_timeout.dev_attr.attr,
+
 	&sensor_dev_attr_pwm1_auto_channels_temp.dev_attr.attr,
 	&sensor_dev_attr_pwm2_auto_channels_temp.dev_attr.attr,
 	&sensor_dev_attr_pwm3_auto_channels_temp.dev_attr.attr,
@@ -1782,7 +2103,7 @@ static int adt7462_detect(struct i2c_client *client,
 	if (revision != ADT7462_REVISION)
 		return -ENODEV;
 
-	strscpy(info->type, "adt7462", I2C_NAME_SIZE);
+	strlcpy(info->type, "adt7462", I2C_NAME_SIZE);
 
 	return 0;
 }

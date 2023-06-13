@@ -722,7 +722,7 @@ unregister_trigger:
 	return ret;
 }
 
-static void atlas_remove(struct i2c_client *client)
+static int atlas_remove(struct i2c_client *client)
 {
 	struct iio_dev *indio_dev = i2c_get_clientdata(client);
 	struct atlas_data *data = iio_priv(indio_dev);
@@ -739,6 +739,8 @@ static void atlas_remove(struct i2c_client *client)
 	if (ret)
 		dev_err(&client->dev, "Failed to power down device (%pe)\n",
 			ERR_PTR(ret));
+
+	return 0;
 }
 
 static int atlas_runtime_suspend(struct device *dev)

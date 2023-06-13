@@ -439,7 +439,7 @@ static int emc6w201_detect(struct i2c_client *client,
 		return -ENODEV;
 	}
 
-	strscpy(info->type, "emc6w201", I2C_NAME_SIZE);
+	strlcpy(info->type, "emc6w201", I2C_NAME_SIZE);
 
 	return 0;
 }

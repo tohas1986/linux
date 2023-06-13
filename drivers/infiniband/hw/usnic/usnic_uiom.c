@@ -95,6 +95,7 @@ static int usnic_uiom_get_pages(unsigned long addr, size_t size, int writable,
 	int ret;
 	int off;
 	int i;
+	int flags;
 	dma_addr_t pa;
 	unsigned int gup_flags;
 	struct mm_struct *mm;
@@ -131,6 +132,8 @@ static int usnic_uiom_get_pages(unsigned long addr, size_t size, int writable,
 		goto out;
 	}
 
+	flags = IOMMU_READ | IOMMU_CACHE;
+	flags |= (writable) ? IOMMU_WRITE : 0;
 	gup_flags = FOLL_WRITE;
 	gup_flags |= (writable) ? 0 : FOLL_FORCE;
 	cur_base = addr & PAGE_MASK;
@@ -277,8 +280,8 @@ iter_chunk:
 				size = pa_end - pa_start + PAGE_SIZE;
 				usnic_dbg("va 0x%lx pa %pa size 0x%zx flags 0x%x",
 					va_start, &pa_start, size, flags);
-				err = iommu_map_atomic(pd->domain, va_start,
-						       pa_start, size, flags);
+				err = iommu_map(pd->domain, va_start, pa_start,
+							size, flags);
 				if (err) {
 					usnic_err("Failed to map va 0x%lx pa %pa size 0x%zx with err %d\n",
 						va_start, &pa_start, size, err);
@@ -294,8 +297,8 @@ iter_chunk:
 				size = pa - pa_start + PAGE_SIZE;
 				usnic_dbg("va 0x%lx pa %pa size 0x%zx flags 0x%x\n",
 					va_start, &pa_start, size, flags);
-				err = iommu_map_atomic(pd->domain, va_start,
-						       pa_start, size, flags);
+				err = iommu_map(pd->domain, va_start, pa_start,
+						size, flags);
 				if (err) {
 					usnic_err("Failed to map va 0x%lx pa %pa size 0x%zx with err %d\n",
 						va_start, &pa_start, size, err);

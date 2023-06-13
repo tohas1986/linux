@@ -14,9 +14,6 @@
 #include <linux/aer.h>
 #include <linux/module.h>
 
-#define CREATE_TRACE_POINTS
-#include <trace/events/habanalabs.h>
-
 #define HL_DRIVER_AUTHOR	"HabanaLabs Kernel Driver Team"
 
 #define HL_DRIVER_DESC		"Driver for HabanaLabs's AI Accelerators"
@@ -30,10 +27,7 @@ static struct class *hl_class;
 static DEFINE_IDR(hl_devs_idr);
 static DEFINE_MUTEX(hl_devs_idr_lock);
 
-#define HL_DEFAULT_TIMEOUT_LOCKED	30	/* 30 seconds */
-#define GAUDI_DEFAULT_TIMEOUT_LOCKED	600	/* 10 minutes */
-
-static int timeout_locked = HL_DEFAULT_TIMEOUT_LOCKED;
+static int timeout_locked = 30;
 static int reset_on_lockup = 1;
 static int memory_scrub;
 static ulong boot_error_status_mask = ULONG_MAX;
@@ -61,12 +55,14 @@ MODULE_PARM_DESC(boot_error_status_mask,
 #define PCI_IDS_GAUDI_SEC		0x1010
 
 #define PCI_IDS_GAUDI2			0x1020
+#define PCI_IDS_GAUDI2_SEC		0x1030
 
 static const struct pci_device_id ids[] = {
 	{ PCI_DEVICE(PCI_VENDOR_ID_HABANALABS, PCI_IDS_GOYA), },
 	{ PCI_DEVICE(PCI_VENDOR_ID_HABANALABS, PCI_IDS_GAUDI), },
 	{ PCI_DEVICE(PCI_VENDOR_ID_HABANALABS, PCI_IDS_GAUDI_SEC), },
 	{ PCI_DEVICE(PCI_VENDOR_ID_HABANALABS, PCI_IDS_GAUDI2), },
+	{ PCI_DEVICE(PCI_VENDOR_ID_HABANALABS, PCI_IDS_GAUDI2_SEC), },
 	{ 0, }
 };
 MODULE_DEVICE_TABLE(pci, ids);
@@ -96,6 +92,9 @@ static enum hl_asic_type get_asic_type(u16 device)
 	case PCI_IDS_GAUDI2:
 		asic_type = ASIC_GAUDI2;
 		break;
+	case PCI_IDS_GAUDI2_SEC:
+		asic_type = ASIC_GAUDI2_SEC;
+		break;
 	default:
 		asic_type = ASIC_INVALID;
 		break;
@@ -108,6 +107,7 @@ static bool is_asic_secured(enum hl_asic_type asic_type)
 {
 	switch (asic_type) {
 	case ASIC_GAUDI_SEC:
+	case ASIC_GAUDI2_SEC:
 		return true;
 	default:
 		return false;
@@ -161,7 +161,7 @@ int hl_device_open(struct inode *inode, struct file *filp)
 	mutex_lock(&hdev->fpriv_list_lock);
 
 	if (!hl_device_operational(hdev, &status)) {
-		dev_dbg_ratelimited(hdev->dev,
+		dev_err_ratelimited(hdev->dev,
 			"Can't open %s because it is %s\n",
 			dev_name(hdev->dev), hdev->status[status]);
 
@@ -207,13 +207,11 @@ int hl_device_open(struct inode *inode, struct file *filp)
 	list_add(&hpriv->dev_node, &hdev->fpriv_list);
 	mutex_unlock(&hdev->fpriv_list_lock);
 
-	hdev->asic_funcs->send_device_activity(hdev, true);
-
 	hl_debugfs_add_file(hpriv);
 
-	atomic_set(&hdev->captured_err_info.cs_timeout.write_enable, 1);
-	atomic_set(&hdev->captured_err_info.razwi.write_enable, 1);
-	hdev->captured_err_info.undef_opcode.write_enable = true;
+	atomic_set(&hdev->last_error.cs_timeout.write_enable, 1);
+	atomic_set(&hdev->last_error.razwi.write_enable, 1);
+	hdev->last_error.undef_opcode.write_enable = true;
 
 	hdev->open_counter++;
 	hdev->last_successful_open_jif = jiffies;
@@ -271,7 +269,7 @@ int hl_device_open_ctrl(struct inode *inode, struct file *filp)
 	mutex_lock(&hdev->fpriv_ctrl_list_lock);
 
 	if (!hl_device_operational(hdev, NULL)) {
-		dev_dbg_ratelimited(hdev->dev_ctrl,
+		dev_err_ratelimited(hdev->dev_ctrl,
 			"Can't open %s because it is disabled or in reset\n",
 			dev_name(hdev->dev_ctrl));
 		rc = -EPERM;
@@ -316,22 +314,12 @@ static void copy_kernel_module_params_to_device(struct hl_device *hdev)
 	hdev->boot_error_status_mask = boot_error_status_mask;
 }
 
-static void fixup_device_params_per_asic(struct hl_device *hdev, int timeout)
+static void fixup_device_params_per_asic(struct hl_device *hdev)
 {
 	switch (hdev->asic_type) {
+	case ASIC_GOYA:
 	case ASIC_GAUDI:
 	case ASIC_GAUDI_SEC:
-		/* If user didn't request a different timeout than the default one, we have
-		 * a different default timeout for Gaudi
-		 */
-		if (timeout == HL_DEFAULT_TIMEOUT_LOCKED)
-			hdev->timeout_jiffies = msecs_to_jiffies(GAUDI_DEFAULT_TIMEOUT_LOCKED *
-										MSEC_PER_SEC);
-
-		hdev->reset_upon_device_release = 0;
-		break;
-
-	case ASIC_GOYA:
 		hdev->reset_upon_device_release = 0;
 		break;
 
@@ -351,7 +339,7 @@ static int fixup_device_params(struct hl_device *hdev)
 	hdev->fw_comms_poll_interval_usec = HL_FW_STATUS_POLL_INTERVAL_USEC;
 
 	if (tmp_timeout)
-		hdev->timeout_jiffies = msecs_to_jiffies(tmp_timeout * MSEC_PER_SEC);
+		hdev->timeout_jiffies = msecs_to_jiffies(tmp_timeout * 1000);
 	else
 		hdev->timeout_jiffies = MAX_SCHEDULE_TIMEOUT;
 
@@ -372,7 +360,7 @@ static int fixup_device_params(struct hl_device *hdev)
 	if (!hdev->cpu_queues_enable)
 		hdev->heartbeat = 0;
 
-	fixup_device_params_per_asic(hdev, tmp_timeout);
+	fixup_device_params_per_asic(hdev);
 
 	return 0;
 }

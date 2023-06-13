@@ -170,7 +170,7 @@ void __init opal_sensor_groups_init(void)
 
 	sgs = kcalloc(of_get_child_count(sg), sizeof(*sgs), GFP_KERNEL);
 	if (!sgs)
-		goto out_sg_put;
+		return;
 
 	sg_kobj = kobject_create_and_add("sensor_groups", opal_kobj);
 	if (!sg_kobj) {
@@ -222,7 +222,6 @@ void __init opal_sensor_groups_init(void)
 		}
 		i++;
 	}
-	of_node_put(sg);
 
 	return;
 
@@ -232,9 +231,6 @@ out_sgs_sgattrs:
 		kfree(sgs[i].sg.attrs);
 	}
 	kobject_put(sg_kobj);
-	of_node_put(node);
 out_sgs:
 	kfree(sgs);
-out_sg_put:
-	of_node_put(sg);
 }

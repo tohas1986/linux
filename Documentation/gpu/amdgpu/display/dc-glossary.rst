@@ -170,7 +170,7 @@ consider asking in the amdgfx and update this page.
     MC
       Memory Controller
 
-    MPC/MPCC
+    MPC
       Multiple pipes and plane combine
 
     MPO

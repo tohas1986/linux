@@ -79,15 +79,16 @@ struct mlx90614_data {
 
 /* Bandwidth values for IIR filtering */
 static const int mlx90614_iir_values[] = {77, 31, 20, 15, 723, 153, 110, 86};
-static const int mlx90614_freqs[][2] = {
-	{0, 150000},
-	{0, 200000},
-	{0, 310000},
-	{0, 770000},
-	{0, 860000},
-	{1, 100000},
-	{1, 530000},
-	{7, 230000}
+static IIO_CONST_ATTR(in_temp_object_filter_low_pass_3db_frequency_available,
+		      "0.15 0.20 0.31 0.77 0.86 1.10 1.53 7.23");
+
+static struct attribute *mlx90614_attributes[] = {
+	&iio_const_attr_in_temp_object_filter_low_pass_3db_frequency_available.dev_attr.attr,
+	NULL,
+};
+
+static const struct attribute_group mlx90614_attr_group = {
+	.attrs = mlx90614_attributes,
 };
 
 /*
@@ -372,22 +373,6 @@ static int mlx90614_write_raw_get_fmt(struct iio_dev *indio_dev,
 	}
 }
 
-static int mlx90614_read_avail(struct iio_dev *indio_dev,
-			       struct iio_chan_spec const *chan,
-			       const int **vals, int *type, int *length,
-			       long mask)
-{
-	switch (mask) {
-	case IIO_CHAN_INFO_LOW_PASS_FILTER_3DB_FREQUENCY:
-		*vals = (int *)mlx90614_freqs;
-		*type = IIO_VAL_INT_PLUS_MICRO;
-		*length = 2 * ARRAY_SIZE(mlx90614_freqs);
-		return IIO_AVAIL_LIST;
-	default:
-		return -EINVAL;
-	}
-}
-
 static const struct iio_chan_spec mlx90614_channels[] = {
 	{
 		.type = IIO_TEMP,
@@ -404,8 +389,6 @@ static const struct iio_chan_spec mlx90614_channels[] = {
 		.info_mask_separate = BIT(IIO_CHAN_INFO_RAW) |
 		    BIT(IIO_CHAN_INFO_CALIBEMISSIVITY) |
 			BIT(IIO_CHAN_INFO_LOW_PASS_FILTER_3DB_FREQUENCY),
-		.info_mask_separate_available =
-			BIT(IIO_CHAN_INFO_LOW_PASS_FILTER_3DB_FREQUENCY),
 		.info_mask_shared_by_type = BIT(IIO_CHAN_INFO_OFFSET) |
 		    BIT(IIO_CHAN_INFO_SCALE),
 	},
@@ -418,8 +401,6 @@ static const struct iio_chan_spec mlx90614_channels[] = {
 		.info_mask_separate = BIT(IIO_CHAN_INFO_RAW) |
 		    BIT(IIO_CHAN_INFO_CALIBEMISSIVITY) |
 			BIT(IIO_CHAN_INFO_LOW_PASS_FILTER_3DB_FREQUENCY),
-		.info_mask_separate_available =
-			BIT(IIO_CHAN_INFO_LOW_PASS_FILTER_3DB_FREQUENCY),
 		.info_mask_shared_by_type = BIT(IIO_CHAN_INFO_OFFSET) |
 		    BIT(IIO_CHAN_INFO_SCALE),
 	},
@@ -429,7 +410,7 @@ static const struct iio_info mlx90614_info = {
 	.read_raw = mlx90614_read_raw,
 	.write_raw = mlx90614_write_raw,
 	.write_raw_get_fmt = mlx90614_write_raw_get_fmt,
-	.read_avail = mlx90614_read_avail,
+	.attrs = &mlx90614_attr_group,
 };
 
 #ifdef CONFIG_PM
@@ -590,7 +571,7 @@ static int mlx90614_probe(struct i2c_client *client,
 	return iio_device_register(indio_dev);
 }
 
-static void mlx90614_remove(struct i2c_client *client)
+static int mlx90614_remove(struct i2c_client *client)
 {
 	struct iio_dev *indio_dev = i2c_get_clientdata(client);
 	struct mlx90614_data *data = iio_priv(indio_dev);
@@ -603,6 +584,8 @@ static void mlx90614_remove(struct i2c_client *client)
 			mlx90614_sleep(data);
 		pm_runtime_set_suspended(&client->dev);
 	}
+
+	return 0;
 }
 
 static const struct i2c_device_id mlx90614_id[] = {

@@ -1198,6 +1198,8 @@ static struct kvm *kvm_create_vm(unsigned long type, const char *fdname)
 			goto out_err_no_arch_destroy_vm;
 	}
 
+	kvm->max_halt_poll_ns = halt_poll_ns;
+
 	r = kvm_arch_init_vm(kvm, type);
 	if (r)
 		goto out_err_no_arch_destroy_vm;
@@ -3375,6 +3377,9 @@ static void grow_halt_poll_ns(struct kvm_vcpu *vcpu)
 	if (val < grow_start)
 		val = grow_start;
 
+	if (val > vcpu->kvm->max_halt_poll_ns)
+		val = vcpu->kvm->max_halt_poll_ns;
+
 	vcpu->halt_poll_ns = val;
 out:
 	trace_kvm_halt_poll_ns_grow(vcpu->vcpu_id, val, old);
@@ -3404,8 +3409,10 @@ static int kvm_vcpu_check_block(struct kvm_vcpu *vcpu)
 	int ret = -EINTR;
 	int idx = srcu_read_lock(&vcpu->kvm->srcu);
 
-	if (kvm_arch_vcpu_runnable(vcpu))
+	if (kvm_arch_vcpu_runnable(vcpu)) {
+		kvm_make_request(KVM_REQ_UNHALT, vcpu);
 		goto out;
+	}
 	if (kvm_cpu_has_pending_timer(vcpu))
 		goto out;
 	if (signal_pending(current))
@@ -3478,24 +3485,6 @@ static inline void update_halt_poll_stats(struct kvm_vcpu *vcpu, ktime_t start,
 	}
 }
 
-static unsigned int kvm_vcpu_max_halt_poll_ns(struct kvm_vcpu *vcpu)
-{
-	struct kvm *kvm = vcpu->kvm;
-
-	if (kvm->override_halt_poll_ns) {
-		/*
-		 * Ensure kvm->max_halt_poll_ns is not read before
-		 * kvm->override_halt_poll_ns.
-		 *
-		 * Pairs with the smp_wmb() when enabling KVM_CAP_HALT_POLL.
-		 */
-		smp_rmb();
-		return READ_ONCE(kvm->max_halt_poll_ns);
-	}
-
-	return READ_ONCE(halt_poll_ns);
-}
-
 /*
  * Emulate a vCPU halt condition, e.g. HLT on x86, WFI on arm, etc...  If halt
  * polling is enabled, busy wait for a short time before blocking to avoid the
@@ -3504,17 +3493,11 @@ static unsigned int kvm_vcpu_max_halt_poll_ns(struct kvm_vcpu *vcpu)
  */
 void kvm_vcpu_halt(struct kvm_vcpu *vcpu)
 {
-	unsigned int max_halt_poll_ns = kvm_vcpu_max_halt_poll_ns(vcpu);
 	bool halt_poll_allowed = !kvm_arch_no_poll(vcpu);
+	bool do_halt_poll = halt_poll_allowed && vcpu->halt_poll_ns;
 	ktime_t start, cur, poll_end;
 	bool waited = false;
-	bool do_halt_poll;
 	u64 halt_ns;
-
-	if (vcpu->halt_poll_ns > max_halt_poll_ns)
-		vcpu->halt_poll_ns = max_halt_poll_ns;
-
-	do_halt_poll = halt_poll_allowed && vcpu->halt_poll_ns;
 
 	start = cur = poll_end = ktime_get();
 	if (do_halt_poll) {
@@ -3554,21 +3537,18 @@ out:
 		update_halt_poll_stats(vcpu, start, poll_end, !waited);
 
 	if (halt_poll_allowed) {
-		/* Recompute the max halt poll time in case it changed. */
-		max_halt_poll_ns = kvm_vcpu_max_halt_poll_ns(vcpu);
-
 		if (!vcpu_valid_wakeup(vcpu)) {
 			shrink_halt_poll_ns(vcpu);
-		} else if (max_halt_poll_ns) {
+		} else if (vcpu->kvm->max_halt_poll_ns) {
 			if (halt_ns <= vcpu->halt_poll_ns)
 				;
 			/* we had a long block, shrink polling */
 			else if (vcpu->halt_poll_ns &&
-				 halt_ns > max_halt_poll_ns)
+				 halt_ns > vcpu->kvm->max_halt_poll_ns)
 				shrink_halt_poll_ns(vcpu);
 			/* we had a short halt and our poll time is too small */
-			else if (vcpu->halt_poll_ns < max_halt_poll_ns &&
-				 halt_ns < max_halt_poll_ns)
+			else if (vcpu->halt_poll_ns < vcpu->kvm->max_halt_poll_ns &&
+				 halt_ns < vcpu->kvm->max_halt_poll_ns)
 				grow_halt_poll_ns(vcpu);
 		} else {
 			vcpu->halt_poll_ns = 0;
@@ -4495,13 +4475,7 @@ static long kvm_vm_ioctl_check_extension_generic(struct kvm *kvm, long arg)
 	case KVM_CAP_NR_MEMSLOTS:
 		return KVM_USER_MEM_SLOTS;
 	case KVM_CAP_DIRTY_LOG_RING:
-#ifdef CONFIG_HAVE_KVM_DIRTY_RING_TSO
-		return KVM_DIRTY_RING_MAX_ENTRIES * sizeof(struct kvm_dirty_gfn);
-#else
-		return 0;
-#endif
-	case KVM_CAP_DIRTY_LOG_RING_ACQ_REL:
-#ifdef CONFIG_HAVE_KVM_DIRTY_RING_ACQ_REL
+#ifdef CONFIG_HAVE_KVM_DIRTY_RING
 		return KVM_DIRTY_RING_MAX_ENTRIES * sizeof(struct kvm_dirty_gfn);
 #else
 		return 0;
@@ -4603,23 +4577,9 @@ static int kvm_vm_ioctl_enable_cap_generic(struct kvm *kvm,
 			return -EINVAL;
 
 		kvm->max_halt_poll_ns = cap->args[0];
-
-		/*
-		 * Ensure kvm->override_halt_poll_ns does not become visible
-		 * before kvm->max_halt_poll_ns.
-		 *
-		 * Pairs with the smp_rmb() in kvm_vcpu_max_halt_poll_ns().
-		 */
-		smp_wmb();
-		kvm->override_halt_poll_ns = true;
-
 		return 0;
 	}
 	case KVM_CAP_DIRTY_LOG_RING:
-	case KVM_CAP_DIRTY_LOG_RING_ACQ_REL:
-		if (!kvm_vm_ioctl_check_extension_generic(kvm, cap->cap))
-			return -EINVAL;
-
 		return kvm_vm_ioctl_enable_dirty_log_ring(kvm, cap->args[0]);
 	default:
 		return kvm_vm_ioctl_enable_cap(kvm, cap);
@@ -5931,7 +5891,7 @@ int kvm_init(void *opaque, unsigned vcpu_size, unsigned vcpu_align,
 
 	r = kvm_async_pf_init();
 	if (r)
-		goto out_free_4;
+		goto out_free_5;
 
 	kvm_chardev_ops.owner = module;
 
@@ -5955,9 +5915,10 @@ int kvm_init(void *opaque, unsigned vcpu_size, unsigned vcpu_align,
 
 out_unreg:
 	kvm_async_pf_deinit();
-out_free_4:
+out_free_5:
 	for_each_possible_cpu(cpu)
 		free_cpumask_var(per_cpu(cpu_kick_mask, cpu));
+out_free_4:
 	kmem_cache_destroy(kvm_vcpu_cache);
 out_free_3:
 	unregister_reboot_notifier(&kvm_reboot_notifier);

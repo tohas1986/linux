@@ -157,7 +157,7 @@ out_del_mux:
 	return result;
 }
 
-static void inv_mpu_remove(struct i2c_client *client)
+static int inv_mpu_remove(struct i2c_client *client)
 {
 	struct iio_dev *indio_dev = i2c_get_clientdata(client);
 	struct inv_mpu6050_state *st = iio_priv(indio_dev);
@@ -166,6 +166,8 @@ static void inv_mpu_remove(struct i2c_client *client)
 		inv_mpu_acpi_delete_mux_client(client);
 		i2c_mux_del_adapters(st->muxc);
 	}
+
+	return 0;
 }
 
 /*

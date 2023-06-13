@@ -979,7 +979,7 @@ out_trigger_unregister:
 	return ret;
 }
 
-static void sx9500_remove(struct i2c_client *client)
+static int sx9500_remove(struct i2c_client *client)
 {
 	struct iio_dev *indio_dev = i2c_get_clientdata(client);
 	struct sx9500_data *data = iio_priv(indio_dev);
@@ -989,6 +989,8 @@ static void sx9500_remove(struct i2c_client *client)
 	if (client->irq > 0)
 		iio_trigger_unregister(data->trig);
 	kfree(data->buffer);
+
+	return 0;
 }
 
 static int sx9500_suspend(struct device *dev)

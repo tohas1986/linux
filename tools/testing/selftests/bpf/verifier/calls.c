@@ -284,7 +284,7 @@
 	.result = ACCEPT,
 },
 {
-	"calls: not on unprivileged",
+	"calls: not on unpriviledged",
 	.insns = {
 	BPF_RAW_INSN(BPF_JMP | BPF_CALL, 0, 1, 0, 2),
 	BPF_MOV64_IMM(BPF_REG_0, 1),

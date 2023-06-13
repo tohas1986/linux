@@ -2,6 +2,8 @@
 #include <errno.h>
 #include <inttypes.h>
 #include <linux/string.h>
+/* For the CLR_() macros */
+#include <pthread.h>
 
 #include <sched.h>
 #include <perf/mmap.h>

@@ -39,7 +39,7 @@
 
 #include "ast_drv.h"
 
-static int ast_modeset = -1;
+int ast_modeset = -1;
 
 MODULE_PARM_DESC(modeset, "Disable/Enable modesetting");
 module_param_named(modeset, ast_modeset, int, 0400);

@@ -1667,18 +1667,6 @@ static inline void kvm_mod_used_mmu_pages(struct kvm *kvm, long nr)
 	percpu_counter_add(&kvm_total_used_mmu_pages, nr);
 }
 
-static void kvm_account_mmu_page(struct kvm *kvm, struct kvm_mmu_page *sp)
-{
-	kvm_mod_used_mmu_pages(kvm, +1);
-	kvm_account_pgtable_pages((void *)sp->spt, +1);
-}
-
-static void kvm_unaccount_mmu_page(struct kvm *kvm, struct kvm_mmu_page *sp)
-{
-	kvm_mod_used_mmu_pages(kvm, -1);
-	kvm_account_pgtable_pages((void *)sp->spt, -1);
-}
-
 static void kvm_mmu_free_shadow_page(struct kvm_mmu_page *sp)
 {
 	MMU_WARN_ON(!is_empty_shadow_page(sp->spt));
@@ -2136,7 +2124,7 @@ static struct kvm_mmu_page *kvm_mmu_alloc_shadow_page(struct kvm *kvm,
 	 */
 	sp->mmu_valid_gen = kvm->arch.mmu_valid_gen;
 	list_add(&sp->link, &kvm->arch.active_mmu_pages);
-	kvm_account_mmu_page(kvm, sp);
+	kvm_mod_used_mmu_pages(kvm, +1);
 
 	sp->gfn = gfn;
 	sp->role = role;
@@ -2443,7 +2431,6 @@ static bool __kvm_mmu_prepare_zap_page(struct kvm *kvm,
 {
 	bool list_unstable, zapped_root = false;
 
-	lockdep_assert_held_write(&kvm->mmu_lock);
 	trace_kvm_mmu_prepare_zap_page(sp);
 	++kvm->stat.mmu_shadow_zapped;
 	*nr_zapped = mmu_zap_unsync_children(kvm, sp, invalid_list);
@@ -2471,7 +2458,7 @@ static bool __kvm_mmu_prepare_zap_page(struct kvm *kvm,
 			list_add(&sp->link, invalid_list);
 		else
 			list_move(&sp->link, invalid_list);
-		kvm_unaccount_mmu_page(kvm, sp);
+		kvm_mod_used_mmu_pages(kvm, -1);
 	} else {
 		/*
 		 * Remove the active root from the active page list, the root
@@ -4263,14 +4250,14 @@ static int direct_page_fault(struct kvm_vcpu *vcpu, struct kvm_page_fault *fault
 	if (is_page_fault_stale(vcpu, fault, mmu_seq))
 		goto out_unlock;
 
-	if (is_tdp_mmu_fault) {
+	r = make_mmu_pages_available(vcpu);
+	if (r)
+		goto out_unlock;
+
+	if (is_tdp_mmu_fault)
 		r = kvm_tdp_mmu_map(vcpu, fault);
-	} else {
-		r = make_mmu_pages_available(vcpu);
-		if (r)
-			goto out_unlock;
+	else
 		r = __direct_map(vcpu, fault);
-	}
 
 out_unlock:
 	if (is_tdp_mmu_fault)
@@ -4305,7 +4292,7 @@ int kvm_handle_page_fault(struct kvm_vcpu *vcpu, u64 error_code,
 
 	vcpu->arch.l1tf_flush_l1d = true;
 	if (!flags) {
-		trace_kvm_page_fault(vcpu, fault_address, error_code);
+		trace_kvm_page_fault(fault_address, error_code);
 
 		if (kvm_event_needs_reinjection(vcpu))
 			kvm_mmu_unprotect_page_virt(vcpu, fault_address);
@@ -6717,12 +6704,10 @@ int kvm_mmu_vendor_module_init(void)
 
 	ret = register_shrinker(&mmu_shrinker, "x86-mmu");
 	if (ret)
-		goto out_shrinker;
+		goto out;
 
 	return 0;
 
-out_shrinker:
-	percpu_counter_destroy(&kvm_total_used_mmu_pages);
 out:
 	mmu_destroy_caches();
 	return ret;

@@ -15,11 +15,12 @@
 #include <drm/drm_blend.h>
 #include <drm/drm_crtc.h>
 #include <drm/drm_device.h>
-#include <drm/drm_fb_dma_helper.h>
+#include <drm/drm_fb_cma_helper.h>
 #include <drm/drm_fourcc.h>
 #include <drm/drm_framebuffer.h>
 #include <drm/drm_managed.h>
 #include <drm/drm_plane.h>
+#include <drm/drm_plane_helper.h>
 #include <drm/drm_vblank.h>
 
 #include <linux/clk.h>
@@ -1098,14 +1099,14 @@ static int zynqmp_disp_layer_update(struct zynqmp_disp_layer *layer,
 		unsigned int height = state->crtc_h / (i ? info->vsub : 1);
 		struct zynqmp_disp_layer_dma *dma = &layer->dmas[i];
 		struct dma_async_tx_descriptor *desc;
-		dma_addr_t dma_addr;
+		dma_addr_t paddr;
 
-		dma_addr = drm_fb_dma_get_gem_addr(state->fb, state, i);
+		paddr = drm_fb_cma_get_gem_addr(state->fb, state, i);
 
 		dma->xt.numf = height;
 		dma->sgl.size = width * info->cpp[i];
 		dma->sgl.icg = state->fb->pitches[i] - dma->sgl.size;
-		dma->xt.src_start = dma_addr;
+		dma->xt.src_start = paddr;
 		dma->xt.frame_size = 1;
 		dma->xt.dir = DMA_MEM_TO_DEV;
 		dma->xt.src_sgl = true;
@@ -1150,8 +1151,8 @@ zynqmp_disp_plane_atomic_check(struct drm_plane *plane,
 
 	return drm_atomic_helper_check_plane_state(new_plane_state,
 						   crtc_state,
-						   DRM_PLANE_NO_SCALING,
-						   DRM_PLANE_NO_SCALING,
+						   DRM_PLANE_HELPER_NO_SCALING,
+						   DRM_PLANE_HELPER_NO_SCALING,
 						   false, false);
 }
 

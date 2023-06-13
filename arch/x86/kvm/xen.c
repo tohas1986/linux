@@ -954,14 +954,6 @@ static int kvm_xen_hypercall_complete_userspace(struct kvm_vcpu *vcpu)
 	return kvm_xen_hypercall_set_result(vcpu, run->xen.u.hcall.result);
 }
 
-static inline int max_evtchn_port(struct kvm *kvm)
-{
-	if (IS_ENABLED(CONFIG_64BIT) && kvm->arch.xen.long_mode)
-		return EVTCHN_2L_NR_CHANNELS;
-	else
-		return COMPAT_EVTCHN_2L_NR_CHANNELS;
-}
-
 static bool wait_pending_event(struct kvm_vcpu *vcpu, int nr_ports,
 			       evtchn_port_t *ports)
 {
@@ -1050,10 +1042,6 @@ static bool kvm_xen_schedop_poll(struct kvm_vcpu *vcpu, bool longmode,
 			*r = -EFAULT;
 			goto out;
 		}
-		if (ports[i] >= max_evtchn_port(vcpu->kvm)) {
-			*r = -EINVAL;
-			goto out;
-		}
 	}
 
 	if (sched_poll.nr_ports == 1)
@@ -1076,6 +1064,7 @@ static bool kvm_xen_schedop_poll(struct kvm_vcpu *vcpu, bool longmode,
 			del_timer(&vcpu->arch.xen.poll_timer);
 
 		vcpu->arch.mp_state = KVM_MP_STATE_RUNNABLE;
+		kvm_clear_request(KVM_REQ_UNHALT, vcpu);
 	}
 
 	vcpu->arch.xen.poll_evtchn = 0;
@@ -1227,7 +1216,6 @@ int kvm_xen_hypercall(struct kvm_vcpu *vcpu)
 	bool longmode;
 	u64 input, params[6], r = -ENOSYS;
 	bool handled = false;
-	u8 cpl;
 
 	input = (u64)kvm_register_read(vcpu, VCPU_REGS_RAX);
 
@@ -1255,16 +1243,8 @@ int kvm_xen_hypercall(struct kvm_vcpu *vcpu)
 		params[5] = (u64)kvm_r9_read(vcpu);
 	}
 #endif
-	cpl = static_call(kvm_x86_get_cpl)(vcpu);
 	trace_kvm_xen_hypercall(input, params[0], params[1], params[2],
 				params[3], params[4], params[5]);
-
-	/*
-	 * Only allow hypercall acceleration for CPL0. The rare hypercalls that
-	 * are permitted in guest userspace can be handled by the VMM.
-	 */
-	if (unlikely(cpl > 0))
-		goto handle_in_userspace;
 
 	switch (input) {
 	case __HYPERVISOR_xen_version:
@@ -1300,11 +1280,10 @@ int kvm_xen_hypercall(struct kvm_vcpu *vcpu)
 	if (handled)
 		return kvm_xen_hypercall_set_result(vcpu, r);
 
-handle_in_userspace:
 	vcpu->run->exit_reason = KVM_EXIT_XEN;
 	vcpu->run->xen.type = KVM_EXIT_XEN_HCALL;
 	vcpu->run->xen.u.hcall.longmode = longmode;
-	vcpu->run->xen.u.hcall.cpl = cpl;
+	vcpu->run->xen.u.hcall.cpl = static_call(kvm_x86_get_cpl)(vcpu);
 	vcpu->run->xen.u.hcall.input = input;
 	vcpu->run->xen.u.hcall.params[0] = params[0];
 	vcpu->run->xen.u.hcall.params[1] = params[1];
@@ -1317,6 +1296,14 @@ handle_in_userspace:
 		kvm_xen_hypercall_complete_userspace;
 
 	return 0;
+}
+
+static inline int max_evtchn_port(struct kvm *kvm)
+{
+	if (IS_ENABLED(CONFIG_64BIT) && kvm->arch.xen.long_mode)
+		return EVTCHN_2L_NR_CHANNELS;
+	else
+		return COMPAT_EVTCHN_2L_NR_CHANNELS;
 }
 
 static void kvm_xen_check_poller(struct kvm_vcpu *vcpu, int port)
@@ -1757,42 +1744,18 @@ static int kvm_xen_eventfd_deassign(struct kvm *kvm, u32 port)
 
 static int kvm_xen_eventfd_reset(struct kvm *kvm)
 {
-	struct evtchnfd *evtchnfd, **all_evtchnfds;
+	struct evtchnfd *evtchnfd;
 	int i;
-	int n = 0;
 
 	mutex_lock(&kvm->lock);
-
-	/*
-	 * Because synchronize_srcu() cannot be called inside the
-	 * critical section, first collect all the evtchnfd objects
-	 * in an array as they are removed from evtchn_ports.
-	 */
-	idr_for_each_entry(&kvm->arch.xen.evtchn_ports, evtchnfd, i)
-		n++;
-
-	all_evtchnfds = kmalloc_array(n, sizeof(struct evtchnfd *), GFP_KERNEL);
-	if (!all_evtchnfds) {
-		mutex_unlock(&kvm->lock);
-		return -ENOMEM;
-	}
-
-	n = 0;
 	idr_for_each_entry(&kvm->arch.xen.evtchn_ports, evtchnfd, i) {
-		all_evtchnfds[n++] = evtchnfd;
 		idr_remove(&kvm->arch.xen.evtchn_ports, evtchnfd->send_port);
-	}
-	mutex_unlock(&kvm->lock);
-
-	synchronize_srcu(&kvm->srcu);
-
-	while (n--) {
-		evtchnfd = all_evtchnfds[n];
+		synchronize_srcu(&kvm->srcu);
 		if (!evtchnfd->deliver.port.port)
 			eventfd_ctx_put(evtchnfd->deliver.eventfd.ctx);
 		kfree(evtchnfd);
 	}
-	kfree(all_evtchnfds);
+	mutex_unlock(&kvm->lock);
 
 	return 0;
 }

@@ -225,8 +225,6 @@ again:
 	return IRQ_HANDLED;
 }
 
-static void free_active_ring(struct sock_mapping *map);
-
 static void pvcalls_front_free_map(struct pvcalls_bedata *bedata,
 				   struct sock_mapping *map)
 {
@@ -242,7 +240,7 @@ static void pvcalls_front_free_map(struct pvcalls_bedata *bedata,
 	for (i = 0; i < (1 << PVCALLS_RING_ORDER); i++)
 		gnttab_end_foreign_access(map->active.ring->ref[i], NULL);
 	gnttab_end_foreign_access(map->active.ref, NULL);
-	free_active_ring(map);
+	free_page((unsigned long)map->active.ring);
 
 	kfree(map);
 }

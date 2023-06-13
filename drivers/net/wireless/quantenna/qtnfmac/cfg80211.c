@@ -449,7 +449,7 @@ qtnf_mgmt_tx(struct wiphy *wiphy, struct wireless_dev *wdev,
 {
 	struct qtnf_vif *vif = qtnf_netdev_get_priv(wdev->netdev);
 	const struct ieee80211_mgmt *mgmt_frame = (void *)params->buf;
-	u32 short_cookie = get_random_u32();
+	u32 short_cookie = prandom_u32();
 	u16 flags = 0;
 	u16 freq;
 
@@ -532,8 +532,8 @@ qtnf_dump_station(struct wiphy *wiphy, struct net_device *dev,
 }
 
 static int qtnf_add_key(struct wiphy *wiphy, struct net_device *dev,
-			int link_id, u8 key_index, bool pairwise,
-			const u8 *mac_addr, struct key_params *params)
+			u8 key_index, bool pairwise, const u8 *mac_addr,
+			struct key_params *params)
 {
 	struct qtnf_vif *vif = qtnf_netdev_get_priv(dev);
 	int ret;
@@ -548,8 +548,7 @@ static int qtnf_add_key(struct wiphy *wiphy, struct net_device *dev,
 }
 
 static int qtnf_del_key(struct wiphy *wiphy, struct net_device *dev,
-			int link_id, u8 key_index, bool pairwise,
-			const u8 *mac_addr)
+			u8 key_index, bool pairwise, const u8 *mac_addr)
 {
 	struct qtnf_vif *vif = qtnf_netdev_get_priv(dev);
 	int ret;
@@ -570,8 +569,7 @@ static int qtnf_del_key(struct wiphy *wiphy, struct net_device *dev,
 }
 
 static int qtnf_set_default_key(struct wiphy *wiphy, struct net_device *dev,
-				int link_id, u8 key_index, bool unicast,
-				bool multicast)
+				u8 key_index, bool unicast, bool multicast)
 {
 	struct qtnf_vif *vif = qtnf_netdev_get_priv(dev);
 	int ret;
@@ -587,7 +585,7 @@ static int qtnf_set_default_key(struct wiphy *wiphy, struct net_device *dev,
 
 static int
 qtnf_set_default_mgmt_key(struct wiphy *wiphy, struct net_device *dev,
-			  int link_id, u8 key_index)
+			  u8 key_index)
 {
 	struct qtnf_vif *vif = qtnf_netdev_get_priv(dev);
 	int ret;
@@ -723,8 +721,9 @@ qtnf_disconnect(struct wiphy *wiphy, struct net_device *dev,
 		return -EFAULT;
 	}
 
-	if (vif->wdev.iftype != NL80211_IFTYPE_STATION)
+	if (vif->wdev.iftype != NL80211_IFTYPE_STATION) {
 		return -EOPNOTSUPP;
+	}
 
 	ret = qtnf_cmd_send_disconnect(vif, reason_code);
 	if (ret)
@@ -750,6 +749,7 @@ qtnf_dump_survey(struct wiphy *wiphy, struct net_device *dev,
 	const struct cfg80211_chan_def *chandef = wdev_chandef(wdev, 0);
 	struct ieee80211_channel *chan;
 	int ret;
+
 
 	sband = wiphy->bands[NL80211_BAND_2GHZ];
 	if (sband && idx >= sband->n_channels) {
@@ -1223,7 +1223,7 @@ int qtnf_wiphy_register(struct qtnf_hw_info *hw_info, struct qtnf_wmac *mac)
 			mac->macinfo.extended_capabilities_len;
 	}
 
-	strscpy(wiphy->fw_version, hw_info->fw_version,
+	strlcpy(wiphy->fw_version, hw_info->fw_version,
 		sizeof(wiphy->fw_version));
 	wiphy->hw_version = hw_info->hw_version;
 

@@ -981,8 +981,10 @@ static int tas5086_i2c_probe(struct i2c_client *i2c)
 	return ret;
 }
 
-static void tas5086_i2c_remove(struct i2c_client *i2c)
-{}
+static int tas5086_i2c_remove(struct i2c_client *i2c)
+{
+	return 0;
+}
 
 static struct i2c_driver tas5086_i2c_driver = {
 	.driver = {

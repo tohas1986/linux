@@ -18,4 +18,3 @@ Performance monitor support
    xgene-pmu
    arm_dsu_pmu
    thunderx2-pmu
-   alibaba_pmu

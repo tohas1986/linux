@@ -16,7 +16,6 @@ mac80211-y := \
 	s1g.o \
 	ibss.o \
 	iface.o \
-	link.o \
 	rate.o \
 	michael.o \
 	tkip.o \

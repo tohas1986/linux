@@ -15,11 +15,7 @@
 
 #include "clk-aspeed.h"
 
-/*
- * This includes the gates (configured from aspeed_g6_gates), plus the
- * explicitly-configured clocks (ASPEED_CLK_HPLL and up).
- */
-#define ASPEED_G6_NUM_CLKS		72
+#define ASPEED_G6_NUM_CLKS		71
 
 #define ASPEED_G6_SILICON_REV		0x014
 #define CHIP_REVISION_ID			GENMASK(23, 16)
@@ -36,20 +32,6 @@
 #define ASPEED_G6_CLK_SELECTION1	0x300
 #define ASPEED_G6_CLK_SELECTION2	0x304
 #define ASPEED_G6_CLK_SELECTION4	0x310
-#define ASPEED_G6_CLK_SELECTION5	0x314
-#define   I3C_CLK_SELECTION_SHIFT	31
-#define   I3C_CLK_SELECTION		BIT(31)
-#define     I3C_CLK_SELECT_HCLK		(0 << I3C_CLK_SELECTION_SHIFT)
-#define     I3C_CLK_SELECT_APLL_DIV	(1 << I3C_CLK_SELECTION_SHIFT)
-#define   APLL_DIV_SELECTION_SHIFT	28
-#define   APLL_DIV_SELECTION		GENMASK(30, 28)
-#define     APLL_DIV_2			(0b001 << APLL_DIV_SELECTION_SHIFT)
-#define     APLL_DIV_3			(0b010 << APLL_DIV_SELECTION_SHIFT)
-#define     APLL_DIV_4			(0b011 << APLL_DIV_SELECTION_SHIFT)
-#define     APLL_DIV_5			(0b100 << APLL_DIV_SELECTION_SHIFT)
-#define     APLL_DIV_6			(0b101 << APLL_DIV_SELECTION_SHIFT)
-#define     APLL_DIV_7			(0b110 << APLL_DIV_SELECTION_SHIFT)
-#define     APLL_DIV_8			(0b111 << APLL_DIV_SELECTION_SHIFT)
 
 #define ASPEED_HPLL_PARAM		0x200
 #define ASPEED_APLL_PARAM		0x210
@@ -73,27 +55,6 @@ static void __iomem *scu_g6_base;
 static u8 soc_rev;
 
 /*
- * The majority of the clocks in the system are gates paired with a reset
- * controller that holds the IP in reset; this is represented by the @reset_idx
- * member of entries here.
- *
- * This borrows from clk_hw_register_gate, but registers two 'gates', one
- * to control the clock enable register and the other to control the reset
- * IP. This allows us to enforce the ordering:
- *
- * 1. Place IP in reset
- * 2. Enable clock
- * 3. Delay
- * 4. Release reset
- *
- * Consequently, if reset_idx is set, reset control is implicit: the clock
- * consumer does not need its own reset handling, as enabling the clock will
- * also deassert reset.
- *
- * There are some gates that do not have an associated reset; these are
- * handled by using -1 as the index for the reset, and the consumer must
- * explictly assert/deassert reset lines as required.
- *
  * Clocks marked with CLK_IS_CRITICAL:
  *
  *  ref0 and ref1 are essential for the SoC to operate
@@ -110,14 +71,14 @@ static const struct aspeed_gate_data aspeed_g6_gates[] = {
 	/* From dpll */
 	[ASPEED_CLK_GATE_DCLK]		= {  5, -1, "dclk-gate",	NULL,	 CLK_IS_CRITICAL }, /* DAC */
 	[ASPEED_CLK_GATE_REF0CLK]	= {  6, -1, "ref0clk-gate",	"clkin", CLK_IS_CRITICAL },
-	[ASPEED_CLK_GATE_USBPORT2CLK]	= {  7,  3, "usb-port2-gate",	NULL,	 0 },	/* USB2.0 Host port 2 */
+	[ASPEED_CLK_GATE_USBPORT2CLK]	= {  7,  3, "usb-port2-gate",	NULL,	 CLK_IS_CRITICAL },	/* USB2.0 Host port 2 */
 	/* Reserved 8 */
-	[ASPEED_CLK_GATE_USBUHCICLK]	= {  9, 15, "usb-uhci-gate",	NULL,	 0 },	/* USB1.1 (requires port 2 enabled) */
+	[ASPEED_CLK_GATE_USBUHCICLK]	= {  9, 15, "usb-uhci-gate",	NULL,	 CLK_IS_CRITICAL },	/* USB1.1 (requires port 2 enabled) */
 	/* From dpll/epll/40mhz usb p1 phy/gpioc6/dp phy pll */
 	[ASPEED_CLK_GATE_D1CLK]		= { 10, 13, "d1clk-gate",	"d1clk", 0 },	/* GFX CRT */
 	/* Reserved 11/12 */
 	[ASPEED_CLK_GATE_YCLK]		= { 13,  4, "yclk-gate",	NULL,	 0 },	/* HAC */
-	[ASPEED_CLK_GATE_USBPORT1CLK]	= { 14, 14, "usb-port1-gate",	NULL,	 0 },	/* USB2 hub/USB2 host port 1/USB1.1 dev */
+	[ASPEED_CLK_GATE_USBPORT1CLK]	= { 14, 14, "usb-port1-gate",	NULL,	 CLK_IS_CRITICAL },	/* USB2 hub/USB2 host port 1/USB1.1 dev */
 	[ASPEED_CLK_GATE_UART5CLK]	= { 15, -1, "uart5clk-gate",	"uart",	 0 },	/* UART5 */
 	/* Reserved 16/19 */
 	[ASPEED_CLK_GATE_MAC1CLK]	= { 20, 11, "mac1clk-gate",	"mac12", 0 },	/* MAC1 */
@@ -136,17 +97,18 @@ static const struct aspeed_gate_data aspeed_g6_gates[] = {
 	[ASPEED_CLK_GATE_LHCCLK]	= { 37, -1, "lhclk-gate",	"lhclk", 0 },	/* LPC master/LPC+ */
 	/* Reserved 38 RSA: no longer used */
 	/* Reserved 39 */
-	[ASPEED_CLK_GATE_I3C0CLK]	= { 40,  40, "i3c0clk-gate",	"i3cclk", 0 }, /* I3C0 */
-	[ASPEED_CLK_GATE_I3C1CLK]	= { 41,  41, "i3c1clk-gate",	"i3cclk", 0 }, /* I3C1 */
-	[ASPEED_CLK_GATE_I3C2CLK]	= { 42,  42, "i3c2clk-gate",	"i3cclk", 0 }, /* I3C2 */
-	[ASPEED_CLK_GATE_I3C3CLK]	= { 43,  43, "i3c3clk-gate",	"i3cclk", 0 }, /* I3C3 */
-	[ASPEED_CLK_GATE_I3C4CLK]	= { 44,  44, "i3c4clk-gate",	"i3cclk", 0 }, /* I3C4 */
-	[ASPEED_CLK_GATE_I3C5CLK]	= { 45,  45, "i3c5clk-gate",	"i3cclk", 0 }, /* I3C5 */
-	/* Reserved: 46 & 47 */
-	[ASPEED_CLK_GATE_UART1CLK]	= { 48,  -1, "uart1clk-gate",	"uart",	 0 },	/* UART1 */
-	[ASPEED_CLK_GATE_UART2CLK]	= { 49,  -1, "uart2clk-gate",	"uart",	 0 },	/* UART2 */
-	[ASPEED_CLK_GATE_UART3CLK]	= { 50,  -1, "uart3clk-gate",	"uart",  0 },	/* UART3 */
-	[ASPEED_CLK_GATE_UART4CLK]	= { 51,  -1, "uart4clk-gate",	"uart",	 0 },	/* UART4 */
+	[ASPEED_CLK_GATE_I3C0CLK]	= { 40,  40, "i3c0clk-gate",	NULL,	 0 },	/* I3C0 */
+	[ASPEED_CLK_GATE_I3C1CLK]	= { 41,  41, "i3c1clk-gate",	NULL,	 0 },	/* I3C1 */
+	[ASPEED_CLK_GATE_I3C2CLK]	= { 42,  42, "i3c2clk-gate",	NULL,	 0 },	/* I3C2 */
+	[ASPEED_CLK_GATE_I3C3CLK]	= { 43,  43, "i3c3clk-gate",	NULL,	 0 },	/* I3C3 */
+	[ASPEED_CLK_GATE_I3C4CLK]	= { 44,  44, "i3c4clk-gate",	NULL,	 0 },	/* I3C4 */
+	[ASPEED_CLK_GATE_I3C5CLK]	= { 45,  45, "i3c5clk-gate",	NULL,	 0 },	/* I3C5 */
+	[ASPEED_CLK_GATE_I3C6CLK]	= { 46,  46, "i3c6clk-gate",	NULL,	 0 },	/* I3C6 */
+	[ASPEED_CLK_GATE_I3C7CLK]	= { 47,  47, "i3c7clk-gate",	NULL,	 0 },	/* I3C7 */
+	[ASPEED_CLK_GATE_UART1CLK]	= { 48,  -1, "uart1clk-gate",	"uart",	 CLK_IS_CRITICAL },	/* UART1 */
+	[ASPEED_CLK_GATE_UART2CLK]	= { 49,  -1, "uart2clk-gate",	"uart",	 CLK_IS_CRITICAL },	/* UART2 */
+	[ASPEED_CLK_GATE_UART3CLK]	= { 50,  -1, "uart3clk-gate",	"uart",  CLK_IS_CRITICAL },	/* UART3 */
+	[ASPEED_CLK_GATE_UART4CLK]	= { 51,  -1, "uart4clk-gate",	"uart",	 CLK_IS_CRITICAL },	/* UART4 */
 	[ASPEED_CLK_GATE_MAC3CLK]	= { 52,  52, "mac3clk-gate",	"mac34", 0 },	/* MAC3 */
 	[ASPEED_CLK_GATE_MAC4CLK]	= { 53,  53, "mac4clk-gate",	"mac34", 0 },	/* MAC4 */
 	[ASPEED_CLK_GATE_UART6CLK]	= { 54,  -1, "uart6clk-gate",	"uartx", 0 },	/* UART6 */
@@ -690,9 +652,6 @@ static int aspeed_g6_clk_probe(struct platform_device *pdev)
 		const struct aspeed_gate_data *gd = &aspeed_g6_gates[i];
 		u32 gate_flags;
 
-		if (!gd->name)
-			continue;
-
 		/*
 		 * Special case: the USB port 1 clock (bit 14) is always
 		 * working the opposite way from the other ones.
@@ -813,14 +772,6 @@ static void __init aspeed_g6_cc(struct regmap *map)
 	/* USB 2.0 port1 phy 40MHz clock */
 	hw = clk_hw_register_fixed_rate(NULL, "usb-phy-40m", NULL, 0, 40000000);
 	aspeed_g6_clk_data->hws[ASPEED_CLK_USBPHY_40M] = hw;
-
-	/* i3c clock: source from apll, divide by 8 */
-	regmap_update_bits(map, ASPEED_G6_CLK_SELECTION5,
-			   I3C_CLK_SELECTION | APLL_DIV_SELECTION,
-			   I3C_CLK_SELECT_APLL_DIV | APLL_DIV_8);
-
-	hw = clk_hw_register_fixed_factor(NULL, "i3cclk", "apll", 0, 1, 8);
-	aspeed_g6_clk_data->hws[ASPEED_CLK_I3C] = hw;
 };
 
 static void __init aspeed_g6_cc_init(struct device_node *np)

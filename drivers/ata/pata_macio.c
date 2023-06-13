@@ -666,7 +666,8 @@ static u8 pata_macio_bmdma_status(struct ata_port *ap)
 	 * a multi-block transfer.
 	 *
 	 * - The dbdma fifo hasn't yet finished flushing to
-	 * system memory when the disk interrupt occurs.
+	 * to system memory when the disk interrupt occurs.
+	 *
 	 */
 
 	/* First check for errors */

@@ -75,8 +75,7 @@ struct efa_com_create_cq_params {
 	u16 uarn;
 	u16 eqn;
 	u8 entry_size_in_bytes;
-	u8 interrupt_mode_enabled : 1;
-	u8 set_src_addr : 1;
+	bool interrupt_mode_enabled;
 };
 
 struct efa_com_create_cq_result {

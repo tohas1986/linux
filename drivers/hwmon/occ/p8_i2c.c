@@ -227,11 +227,13 @@ static int p8_i2c_occ_probe(struct i2c_client *client)
 	return occ_setup(occ);
 }
 
-static void p8_i2c_occ_remove(struct i2c_client *client)
+static int p8_i2c_occ_remove(struct i2c_client *client)
 {
 	struct occ *occ = dev_get_drvdata(&client->dev);
 
 	occ_shutdown(occ);
+
+	return 0;
 }
 
 static const struct of_device_id p8_i2c_occ_of_match[] = {

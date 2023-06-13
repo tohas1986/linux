@@ -1736,10 +1736,10 @@ static void ql_get_drvinfo(struct net_device *ndev,
 			   struct ethtool_drvinfo *drvinfo)
 {
 	struct ql3_adapter *qdev = netdev_priv(ndev);
-	strscpy(drvinfo->driver, ql3xxx_driver_name, sizeof(drvinfo->driver));
-	strscpy(drvinfo->version, ql3xxx_driver_version,
+	strlcpy(drvinfo->driver, ql3xxx_driver_name, sizeof(drvinfo->driver));
+	strlcpy(drvinfo->version, ql3xxx_driver_version,
 		sizeof(drvinfo->version));
-	strscpy(drvinfo->bus_info, pci_name(qdev->pdev),
+	strlcpy(drvinfo->bus_info, pci_name(qdev->pdev),
 		sizeof(drvinfo->bus_info));
 }
 
@@ -2471,7 +2471,6 @@ static netdev_tx_t ql3xxx_send(struct sk_buff *skb,
 					     skb_shinfo(skb)->nr_frags);
 	if (tx_cb->seg_count == -1) {
 		netdev_err(ndev, "%s: invalid segment count!\n", __func__);
-		dev_kfree_skb_any(skb);
 		return NETDEV_TX_OK;
 	}
 
@@ -3814,7 +3813,7 @@ static int ql3xxx_probe(struct pci_dev *pdev,
 	ndev->ethtool_ops = &ql3xxx_ethtool_ops;
 	ndev->watchdog_timeo = 5 * HZ;
 
-	netif_napi_add(ndev, &qdev->napi, ql_poll);
+	netif_napi_add(ndev, &qdev->napi, ql_poll, 64);
 
 	ndev->irq = pdev->irq;
 

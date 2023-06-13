@@ -72,12 +72,17 @@ nfs_fattr_to_ino_t(struct nfs_fattr *fattr)
 	return nfs_fileid_to_ino_t(fattr->fileid);
 }
 
-int nfs_wait_bit_killable(struct wait_bit_key *key, int mode)
+static int nfs_wait_killable(int mode)
 {
-	schedule();
+	freezable_schedule_unsafe();
 	if (signal_pending_state(mode, current))
 		return -ERESTARTSYS;
 	return 0;
+}
+
+int nfs_wait_bit_killable(struct wait_bit_key *key, int mode)
+{
+	return nfs_wait_killable(mode);
 }
 EXPORT_SYMBOL_GPL(nfs_wait_bit_killable);
 
@@ -313,7 +318,7 @@ struct nfs_find_desc {
 static int
 nfs_find_actor(struct inode *inode, void *opaque)
 {
-	struct nfs_find_desc	*desc = opaque;
+	struct nfs_find_desc	*desc = (struct nfs_find_desc *)opaque;
 	struct nfs_fh		*fh = desc->fh;
 	struct nfs_fattr	*fattr = desc->fattr;
 
@@ -331,7 +336,7 @@ nfs_find_actor(struct inode *inode, void *opaque)
 static int
 nfs_init_locked(struct inode *inode, void *opaque)
 {
-	struct nfs_find_desc	*desc = opaque;
+	struct nfs_find_desc	*desc = (struct nfs_find_desc *)opaque;
 	struct nfs_fattr	*fattr = desc->fattr;
 
 	set_nfs_fileid(inode, fattr->fileid);
@@ -1327,8 +1332,7 @@ int nfs_clear_invalid_mapping(struct address_space *mapping)
 	 */
 	for (;;) {
 		ret = wait_on_bit_action(bitlock, NFS_INO_INVALIDATING,
-					 nfs_wait_bit_killable,
-					 TASK_KILLABLE|TASK_FREEZABLE_UNSAFE);
+					 nfs_wait_bit_killable, TASK_KILLABLE);
 		if (ret)
 			goto out;
 		spin_lock(&inode->i_lock);
@@ -2267,7 +2271,7 @@ static inline void nfs4_init_once(struct nfs_inode *nfsi)
 
 static void init_once(void *foo)
 {
-	struct nfs_inode *nfsi = foo;
+	struct nfs_inode *nfsi = (struct nfs_inode *) foo;
 
 	inode_init_once(&nfsi->vfs_inode);
 	INIT_LIST_HEAD(&nfsi->open_files);

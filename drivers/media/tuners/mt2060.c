@@ -509,9 +509,11 @@ err:
 	return ret;
 }
 
-static void mt2060_remove(struct i2c_client *client)
+static int mt2060_remove(struct i2c_client *client)
 {
 	dev_dbg(&client->dev, "\n");
+
+	return 0;
 }
 
 static const struct i2c_device_id mt2060_id_table[] = {

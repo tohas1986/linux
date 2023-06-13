@@ -45,4 +45,4 @@ obj-$(CONFIG_STMARK2)	+= stmark2.o
 obj-$(CONFIG_PCI)	+= pci.o
 
 obj-y			+= gpio.o
-obj-y			+= head.o
+extra-y := head.o

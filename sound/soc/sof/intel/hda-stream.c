@@ -19,7 +19,6 @@
 #include <sound/hdaudio_ext.h>
 #include <sound/hda_register.h>
 #include <sound/sof.h>
-#include <trace/events/sof_intel.h>
 #include "../ops.h"
 #include "../sof-audio.h"
 #include "hda.h"
@@ -94,6 +93,9 @@ static int hda_setup_bdle(struct snd_sof_dev *sdev,
 		bdl++;
 		hstream->frags++;
 		offset += chunk;
+
+		dev_vdbg(sdev->dev, "bdl, frags:%d, chunk size:0x%x;\n",
+			 hstream->frags, chunk);
 	}
 
 	*bdlp = bdl;
@@ -698,7 +700,7 @@ bool hda_dsp_check_stream_irq(struct snd_sof_dev *sdev)
 	spin_lock_irq(&bus->reg_lock);
 
 	status = snd_hdac_chip_readl(bus, INTSTS);
-	trace_sof_intel_hda_dsp_check_stream_irq(sdev, status);
+	dev_vdbg(bus->dev, "stream irq, INTSTS status: 0x%x\n", status);
 
 	/* if Register inaccessible, ignore it.*/
 	if (status != 0xffffffff)
@@ -737,7 +739,8 @@ static bool hda_dsp_stream_check(struct hdac_bus *bus, u32 status)
 		if (status & BIT(s->index) && s->opened) {
 			sd_status = snd_hdac_stream_readb(s, SD_STS);
 
-			trace_sof_intel_hda_dsp_stream_status(bus->dev, s, sd_status);
+			dev_vdbg(bus->dev, "stream %d status 0x%x\n",
+				 s->index, sd_status);
 
 			snd_hdac_stream_writeb(s, SD_STS, sd_status);
 

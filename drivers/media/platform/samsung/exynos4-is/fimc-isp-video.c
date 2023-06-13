@@ -312,7 +312,7 @@ static int isp_video_release(struct file *file)
 	is_singular_file = v4l2_fh_is_singular_file(file);
 
 	if (is_singular_file && ivc->streaming) {
-		video_device_pipeline_stop(&ivc->ve.vdev);
+		media_pipeline_stop(entity);
 		ivc->streaming = 0;
 	}
 
@@ -490,9 +490,10 @@ static int isp_video_streamon(struct file *file, void *priv,
 {
 	struct fimc_isp *isp = video_drvdata(file);
 	struct exynos_video_entity *ve = &isp->video_capture.ve;
+	struct media_entity *me = &ve->vdev.entity;
 	int ret;
 
-	ret = video_device_pipeline_start(&ve->vdev, &ve->pipe->mp);
+	ret = media_pipeline_start(me, &ve->pipe->mp);
 	if (ret < 0)
 		return ret;
 
@@ -507,7 +508,7 @@ static int isp_video_streamon(struct file *file, void *priv,
 	isp->video_capture.streaming = 1;
 	return 0;
 p_stop:
-	video_device_pipeline_stop(&ve->vdev);
+	media_pipeline_stop(me);
 	return ret;
 }
 
@@ -522,7 +523,7 @@ static int isp_video_streamoff(struct file *file, void *priv,
 	if (ret < 0)
 		return ret;
 
-	video_device_pipeline_stop(&video->ve.vdev);
+	media_pipeline_stop(&video->ve.vdev.entity);
 	video->streaming = 0;
 	return 0;
 }

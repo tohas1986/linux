@@ -10,16 +10,17 @@
  * Date: May 21, 1996
  *
  * Functions:
- *      vt6655_mac_is_reg_bits_off - Test if All test Bits Off
- *      vt6655_mac_set_short_retry_limit - Set 802.11 Short Retry limit
+ *      MACbIsRegBitsOff - Test if All test Bits Off
+ *      MACbIsIntDisable - Test if MAC interrupt disable
+ *      MACvSetShortRetryLimit - Set 802.11 Short Retry limit
  *      MACvSetLongRetryLimit - Set 802.11 Long Retry limit
- *      vt6655_mac_set_loopback_mode - Set MAC Loopback Mode
- *      vt6655_mac_save_context - Save Context of MAC Registers
- *      vt6655_mac_restore_context - Restore Context of MAC Registers
+ *      MACvSetLoopbackMode - Set MAC Loopback Mode
+ *      MACvSaveContext - Save Context of MAC Registers
+ *      MACvRestoreContext - Restore Context of MAC Registers
  *      MACbSoftwareReset - Software Reset MAC
- *      vt6655_mac_safe_rx_off - Turn Off MAC Rx
- *      vt6655_mac_safe_tx_off - Turn Off MAC Tx
- *      vt6655_mac_safe_stop - Stop MAC function
+ *      MACbSafeRxOff - Turn Off MAC Rx
+ *      MACbSafeTxOff - Turn Off MAC Tx
+ *      MACbSafeStop - Stop MAC function
  *      MACbShutdown - Shut down MAC
  *      MACvInitialize - Initialize MAC
  *      MACvSetCurrRxDescAddr - Set Rx Descriptors Address
@@ -85,21 +86,43 @@ static void vt6655_mac_clear_stck_ds(void __iomem *iobase)
  * Parameters:
  *  In:
  *      io_base    - Base Address for MAC
- *      reg_offset - Offset of MAC Register
- *      mask       - Test bits
+ *      byRegOfs    - Offset of MAC Register
+ *      byTestBits  - Test bits
  *  Out:
  *      none
  *
  * Return Value: true if all test bits Off; otherwise false
  *
  */
-static bool vt6655_mac_is_reg_bits_off(struct vnt_private *priv,
-				       unsigned char reg_offset,
-				       unsigned char mask)
+bool MACbIsRegBitsOff(struct vnt_private *priv, unsigned char byRegOfs,
+		      unsigned char byTestBits)
 {
 	void __iomem *io_base = priv->port_offset;
 
-	return !(ioread8(io_base + reg_offset) & mask);
+	return !(ioread8(io_base + byRegOfs) & byTestBits);
+}
+
+/*
+ * Description:
+ *      Test if MAC interrupt disable
+ *
+ * Parameters:
+ *  In:
+ *      io_base    - Base Address for MAC
+ *  Out:
+ *      none
+ *
+ * Return Value: true if interrupt is disable; otherwise false
+ *
+ */
+bool MACbIsIntDisable(struct vnt_private *priv)
+{
+	void __iomem *io_base = priv->port_offset;
+
+	if (ioread32(io_base + MAC_REG_IMR))
+		return false;
+
+	return true;
 }
 
 /*
@@ -109,18 +132,19 @@ static bool vt6655_mac_is_reg_bits_off(struct vnt_private *priv,
  * Parameters:
  *  In:
  *      io_base    - Base Address for MAC
- *      retry_limit - Retry Limit
+ *      byRetryLimit- Retry Limit
  *  Out:
  *      none
  *
  * Return Value: none
  *
  */
-void vt6655_mac_set_short_retry_limit(struct vnt_private *priv, unsigned char retry_limit)
+void MACvSetShortRetryLimit(struct vnt_private *priv,
+			    unsigned char byRetryLimit)
 {
 	void __iomem *io_base = priv->port_offset;
 	/* set SRT */
-	iowrite8(retry_limit, io_base + MAC_REG_SRT);
+	iowrite8(byRetryLimit, io_base + MAC_REG_SRT);
 }
 
 /*
@@ -152,20 +176,21 @@ void MACvSetLongRetryLimit(struct vnt_private *priv,
  * Parameters:
  *  In:
  *      io_base        - Base Address for MAC
- *      loopback_mode  - Loopback Mode
+ *      byLoopbackMode  - Loopback Mode
  *  Out:
  *      none
  *
  * Return Value: none
  *
  */
-static void vt6655_mac_set_loopback_mode(struct vnt_private *priv, u8 loopback_mode)
+void MACvSetLoopbackMode(struct vnt_private *priv, unsigned char byLoopbackMode)
 {
 	void __iomem *io_base = priv->port_offset;
 
-	loopback_mode <<= 6;
+	byLoopbackMode <<= 6;
 	/* set TCR */
-	iowrite8((ioread8(io_base + MAC_REG_TEST) & 0x3f) | loopback_mode, io_base + MAC_REG_TEST);
+	iowrite8((ioread8(io_base + MAC_REG_TEST) & 0x3f) | byLoopbackMode,
+		 io_base + MAC_REG_TEST);
 }
 
 /*
@@ -181,20 +206,20 @@ static void vt6655_mac_set_loopback_mode(struct vnt_private *priv, u8 loopback_m
  * Return Value: none
  *
  */
-static void vt6655_mac_save_context(struct vnt_private *priv, u8 *cxt_buf)
+void MACvSaveContext(struct vnt_private *priv, unsigned char *cxt_buf)
 {
 	void __iomem *io_base = priv->port_offset;
 
 	/* read page0 register */
 	memcpy_fromio(cxt_buf, io_base, MAC_MAX_CONTEXT_SIZE_PAGE0);
 
-	VT6655_MAC_SELECT_PAGE1(io_base);
+	MACvSelectPage1(io_base);
 
 	/* read page1 register */
 	memcpy_fromio(cxt_buf + MAC_MAX_CONTEXT_SIZE_PAGE0, io_base,
 		      MAC_MAX_CONTEXT_SIZE_PAGE1);
 
-	VT6655_MAC_SELECT_PAGE0(io_base);
+	MACvSelectPage0(io_base);
 }
 
 /*
@@ -211,16 +236,16 @@ static void vt6655_mac_save_context(struct vnt_private *priv, u8 *cxt_buf)
  * Return Value: none
  *
  */
-static void vt6655_mac_restore_context(struct vnt_private *priv, u8 *cxt_buf)
+void MACvRestoreContext(struct vnt_private *priv, unsigned char *cxt_buf)
 {
 	void __iomem *io_base = priv->port_offset;
 
-	VT6655_MAC_SELECT_PAGE1(io_base);
+	MACvSelectPage1(io_base);
 	/* restore page1 */
 	memcpy_toio(io_base, cxt_buf + MAC_MAX_CONTEXT_SIZE_PAGE0,
 		    MAC_MAX_CONTEXT_SIZE_PAGE1);
 
-	VT6655_MAC_SELECT_PAGE0(io_base);
+	MACvSelectPage0(io_base);
 
 	/* restore RCR,TCR,IMR... */
 	memcpy_toio(io_base + MAC_REG_RCR, cxt_buf + MAC_REG_RCR,
@@ -293,20 +318,23 @@ bool MACbSoftwareReset(struct vnt_private *priv)
  * Return Value: true if success; otherwise false
  *
  */
-static void vt6655_mac_save_soft_reset(struct vnt_private *priv)
+bool MACbSafeSoftwareReset(struct vnt_private *priv)
 {
-	u8 tmp_reg_data[MAC_MAX_CONTEXT_SIZE_PAGE0 + MAC_MAX_CONTEXT_SIZE_PAGE1];
+	unsigned char abyTmpRegData[MAC_MAX_CONTEXT_SIZE_PAGE0 + MAC_MAX_CONTEXT_SIZE_PAGE1];
+	bool bRetVal;
 
 	/* PATCH....
 	 * save some important register's value, then do
 	 * reset, then restore register's value
 	 */
 	/* save MAC context */
-	vt6655_mac_save_context(priv, tmp_reg_data);
+	MACvSaveContext(priv, abyTmpRegData);
 	/* do reset */
-	MACbSoftwareReset(priv);
+	bRetVal = MACbSoftwareReset(priv);
 	/* restore MAC context, except CR0 */
-	vt6655_mac_restore_context(priv, tmp_reg_data);
+	MACvRestoreContext(priv, abyTmpRegData);
+
+	return bRetVal;
 }
 
 /*
@@ -322,7 +350,7 @@ static void vt6655_mac_save_soft_reset(struct vnt_private *priv)
  * Return Value: true if success; otherwise false
  *
  */
-static bool vt6655_mac_safe_rx_off(struct vnt_private *priv)
+bool MACbSafeRxOff(struct vnt_private *priv)
 {
 	void __iomem *io_base = priv->port_offset;
 	unsigned short ww;
@@ -376,7 +404,7 @@ static bool vt6655_mac_safe_rx_off(struct vnt_private *priv)
  * Return Value: true if success; otherwise false
  *
  */
-static bool vt6655_mac_safe_tx_off(struct vnt_private *priv)
+bool MACbSafeTxOff(struct vnt_private *priv)
 {
 	void __iomem *io_base = priv->port_offset;
 	unsigned short ww;
@@ -432,20 +460,20 @@ static bool vt6655_mac_safe_tx_off(struct vnt_private *priv)
  * Return Value: true if success; otherwise false
  *
  */
-static bool vt6655_mac_safe_stop(struct vnt_private *priv)
+bool MACbSafeStop(struct vnt_private *priv)
 {
 	void __iomem *io_base = priv->port_offset;
 
 	vt6655_mac_reg_bits_off(io_base, MAC_REG_TCR, TCR_AUTOBCNTX);
 
-	if (!vt6655_mac_safe_rx_off(priv)) {
-		pr_debug(" vt6655_mac_safe_rx_off == false)\n");
-		vt6655_mac_save_soft_reset(priv);
+	if (!MACbSafeRxOff(priv)) {
+		pr_debug(" MACbSafeRxOff == false)\n");
+		MACbSafeSoftwareReset(priv);
 		return false;
 	}
-	if (!vt6655_mac_safe_tx_off(priv)) {
-		pr_debug(" vt6655_mac_safe_tx_off == false)\n");
-		vt6655_mac_save_soft_reset(priv);
+	if (!MACbSafeTxOff(priv)) {
+		pr_debug(" MACbSafeTxOff == false)\n");
+		MACbSafeSoftwareReset(priv);
 		return false;
 	}
 
@@ -472,13 +500,13 @@ bool MACbShutdown(struct vnt_private *priv)
 	void __iomem *io_base = priv->port_offset;
 	/* disable MAC IMR */
 	iowrite32(0, io_base + MAC_REG_IMR);
-	vt6655_mac_set_loopback_mode(priv, MAC_LB_INTERNAL);
+	MACvSetLoopbackMode(priv, MAC_LB_INTERNAL);
 	/* stop the adapter */
-	if (!vt6655_mac_safe_stop(priv)) {
-		vt6655_mac_set_loopback_mode(priv, MAC_LB_NONE);
+	if (!MACbSafeStop(priv)) {
+		MACvSetLoopbackMode(priv, MAC_LB_NONE);
 		return false;
 	}
-	vt6655_mac_set_loopback_mode(priv, MAC_LB_NONE);
+	MACvSetLoopbackMode(priv, MAC_LB_NONE);
 	return true;
 }
 
@@ -527,7 +555,7 @@ void MACvInitialize(struct vnt_private *priv)
  * Return Value: none
  *
  */
-void vt6655_mac_set_curr_rx_0_desc_addr(struct vnt_private *priv, u32 curr_desc_addr)
+void MACvSetCurrRx0DescAddr(struct vnt_private *priv, u32 curr_desc_addr)
 {
 	void __iomem *io_base = priv->port_offset;
 	unsigned short ww;
@@ -561,7 +589,7 @@ void vt6655_mac_set_curr_rx_0_desc_addr(struct vnt_private *priv, u32 curr_desc_
  * Return Value: none
  *
  */
-void vt6655_mac_set_curr_rx_1_desc_addr(struct vnt_private *priv, u32 curr_desc_addr)
+void MACvSetCurrRx1DescAddr(struct vnt_private *priv, u32 curr_desc_addr)
 {
 	void __iomem *io_base = priv->port_offset;
 	unsigned short ww;
@@ -595,7 +623,8 @@ void vt6655_mac_set_curr_rx_1_desc_addr(struct vnt_private *priv, u32 curr_desc_
  * Return Value: none
  *
  */
-static void vt6655_mac_set_curr_tx_0_desc_addr_ex(struct vnt_private *priv, u32 curr_desc_addr)
+void MACvSetCurrTx0DescAddrEx(struct vnt_private *priv,
+			      u32 curr_desc_addr)
 {
 	void __iomem *io_base = priv->port_offset;
 	unsigned short ww;
@@ -630,7 +659,8 @@ static void vt6655_mac_set_curr_tx_0_desc_addr_ex(struct vnt_private *priv, u32 
  *
  */
 /* TxDMA1 = AC0DMA */
-static void vt6655_mac_set_curr_ac_0_desc_addr_ex(struct vnt_private *priv, u32 curr_desc_addr)
+void MACvSetCurrAC0DescAddrEx(struct vnt_private *priv,
+			      u32 curr_desc_addr)
 {
 	void __iomem *io_base = priv->port_offset;
 	unsigned short ww;
@@ -651,12 +681,13 @@ static void vt6655_mac_set_curr_ac_0_desc_addr_ex(struct vnt_private *priv, u32 
 		iowrite8(DMACTL_RUN, io_base + MAC_REG_AC0DMACTL);
 }
 
-void vt6655_mac_set_curr_tx_desc_addr(int tx_type, struct vnt_private *priv, u32 curr_desc_addr)
+void MACvSetCurrTXDescAddr(int iTxType, struct vnt_private *priv,
+			   u32 curr_desc_addr)
 {
-	if (tx_type == TYPE_AC0DMA)
-		vt6655_mac_set_curr_ac_0_desc_addr_ex(priv, curr_desc_addr);
-	else if (tx_type == TYPE_TXDMA0)
-		vt6655_mac_set_curr_tx_0_desc_addr_ex(priv, curr_desc_addr);
+	if (iTxType == TYPE_AC0DMA)
+		MACvSetCurrAC0DescAddrEx(priv, curr_desc_addr);
+	else if (iTxType == TYPE_TXDMA0)
+		MACvSetCurrTx0DescAddrEx(priv, curr_desc_addr);
 }
 
 /*
@@ -736,7 +767,7 @@ bool MACbPSWakeup(struct vnt_private *priv)
 	void __iomem *io_base = priv->port_offset;
 	unsigned int ww;
 	/* Read PSCTL */
-	if (vt6655_mac_is_reg_bits_off(priv, MAC_REG_PSCTL, PSCTL_PS))
+	if (MACbIsRegBitsOff(priv, MAC_REG_PSCTL, PSCTL_PS))
 		return true;
 
 	/* Disable PS */

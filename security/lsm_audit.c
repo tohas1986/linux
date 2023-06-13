@@ -44,6 +44,9 @@ int ipv4_skb_to_auditdata(struct sk_buff *skb,
 	struct iphdr *ih;
 
 	ih = ip_hdr(skb);
+	if (ih == NULL)
+		return -EINVAL;
+
 	ad->u.net->v4info.saddr = ih->saddr;
 	ad->u.net->v4info.daddr = ih->daddr;
 
@@ -56,6 +59,8 @@ int ipv4_skb_to_auditdata(struct sk_buff *skb,
 	switch (ih->protocol) {
 	case IPPROTO_TCP: {
 		struct tcphdr *th = tcp_hdr(skb);
+		if (th == NULL)
+			break;
 
 		ad->u.net->sport = th->source;
 		ad->u.net->dport = th->dest;
@@ -63,6 +68,8 @@ int ipv4_skb_to_auditdata(struct sk_buff *skb,
 	}
 	case IPPROTO_UDP: {
 		struct udphdr *uh = udp_hdr(skb);
+		if (uh == NULL)
+			break;
 
 		ad->u.net->sport = uh->source;
 		ad->u.net->dport = uh->dest;
@@ -70,6 +77,8 @@ int ipv4_skb_to_auditdata(struct sk_buff *skb,
 	}
 	case IPPROTO_DCCP: {
 		struct dccp_hdr *dh = dccp_hdr(skb);
+		if (dh == NULL)
+			break;
 
 		ad->u.net->sport = dh->dccph_sport;
 		ad->u.net->dport = dh->dccph_dport;
@@ -77,7 +86,8 @@ int ipv4_skb_to_auditdata(struct sk_buff *skb,
 	}
 	case IPPROTO_SCTP: {
 		struct sctphdr *sh = sctp_hdr(skb);
-
+		if (sh == NULL)
+			break;
 		ad->u.net->sport = sh->source;
 		ad->u.net->dport = sh->dest;
 		break;
@@ -105,6 +115,8 @@ int ipv6_skb_to_auditdata(struct sk_buff *skb,
 	__be16 frag_off;
 
 	ip6 = ipv6_hdr(skb);
+	if (ip6 == NULL)
+		return -EINVAL;
 	ad->u.net->v6info.saddr = ip6->saddr;
 	ad->u.net->v6info.daddr = ip6->daddr;
 	/* IPv6 can have several extension header before the Transport header

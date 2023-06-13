@@ -532,8 +532,6 @@ Standard Plane Properties
 .. kernel-doc:: drivers/gpu/drm/drm_plane.c
    :doc: standard plane properties
 
-.. _plane_composition_properties:
-
 Plane Composition Properties
 ----------------------------
 

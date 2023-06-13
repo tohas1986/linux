@@ -28,7 +28,6 @@
 #define __DAL_DPP_H__
 
 #include "transform.h"
-#include "cursor_reg_cache.h"
 
 union defer_reg_writes {
 	struct {
@@ -59,9 +58,6 @@ struct dpp {
 
 	struct pwl_params shaper_params;
 	bool cm_bypass_mode;
-
-	struct cursor_position_cache_dpp  pos;
-	struct cursor_attribute_cache_dpp att;
 };
 
 struct dpp_input_csc_matrix {

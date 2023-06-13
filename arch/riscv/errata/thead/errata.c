@@ -17,9 +17,6 @@
 static bool errata_probe_pbmt(unsigned int stage,
 			      unsigned long arch_id, unsigned long impid)
 {
-	if (!IS_ENABLED(CONFIG_ERRATA_THEAD_PBMT))
-		return false;
-
 	if (arch_id != 0 || impid != 0)
 		return false;
 
@@ -33,9 +30,7 @@ static bool errata_probe_pbmt(unsigned int stage,
 static bool errata_probe_cmo(unsigned int stage,
 			     unsigned long arch_id, unsigned long impid)
 {
-	if (!IS_ENABLED(CONFIG_ERRATA_THEAD_CMO))
-		return false;
-
+#ifdef CONFIG_ERRATA_THEAD_CMO
 	if (arch_id != 0 || impid != 0)
 		return false;
 
@@ -45,6 +40,9 @@ static bool errata_probe_cmo(unsigned int stage,
 	riscv_cbom_block_size = L1_CACHE_BYTES;
 	riscv_noncoherent_supported();
 	return true;
+#else
+	return false;
+#endif
 }
 
 static u32 thead_errata_probe(unsigned int stage,
@@ -53,10 +51,10 @@ static u32 thead_errata_probe(unsigned int stage,
 	u32 cpu_req_errata = 0;
 
 	if (errata_probe_pbmt(stage, archid, impid))
-		cpu_req_errata |= BIT(ERRATA_THEAD_PBMT);
+		cpu_req_errata |= (1U << ERRATA_THEAD_PBMT);
 
 	if (errata_probe_cmo(stage, archid, impid))
-		cpu_req_errata |= BIT(ERRATA_THEAD_CMO);
+		cpu_req_errata |= (1U << ERRATA_THEAD_CMO);
 
 	return cpu_req_errata;
 }

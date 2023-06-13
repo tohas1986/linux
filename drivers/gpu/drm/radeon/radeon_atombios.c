@@ -826,6 +826,8 @@ bool radeon_get_atom_connector_info_from_object_table(struct drm_device *dev)
 	}
 
 	radeon_link_encoder_connector(dev);
+
+	radeon_setup_mst_connector(dev);
 	return true;
 }
 

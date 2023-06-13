@@ -372,12 +372,29 @@ static const struct hwmon_chip_info tps23861_chip_info = {
 	.info = tps23861_info,
 };
 
-static char *port_operating_mode_string(uint8_t mode_reg, unsigned int port)
+static char *tps23861_port_operating_mode(struct tps23861_data *data, int port)
 {
-	unsigned int mode = ~0;
+	unsigned int regval;
+	int mode;
 
-	if (port < TPS23861_NUM_PORTS)
-		mode = (mode_reg >> (2 * port)) & OPERATING_MODE_PORT_1_MASK;
+	regmap_read(data->regmap, OPERATING_MODE, &regval);
+
+	switch (port) {
+	case 1:
+		mode = FIELD_GET(OPERATING_MODE_PORT_1_MASK, regval);
+		break;
+	case 2:
+		mode = FIELD_GET(OPERATING_MODE_PORT_2_MASK, regval);
+		break;
+	case 3:
+		mode = FIELD_GET(OPERATING_MODE_PORT_3_MASK, regval);
+		break;
+	case 4:
+		mode = FIELD_GET(OPERATING_MODE_PORT_4_MASK, regval);
+		break;
+	default:
+		mode = -EINVAL;
+	}
 
 	switch (mode) {
 	case OPERATING_MODE_OFF:
@@ -393,9 +410,15 @@ static char *port_operating_mode_string(uint8_t mode_reg, unsigned int port)
 	}
 }
 
-static char *port_detect_status_string(uint8_t status_reg)
+static char *tps23861_port_detect_status(struct tps23861_data *data, int port)
 {
-	switch (FIELD_GET(PORT_STATUS_DETECT_MASK, status_reg)) {
+	unsigned int regval;
+
+	regmap_read(data->regmap,
+		    PORT_1_STATUS + (port - 1),
+		    &regval);
+
+	switch (FIELD_GET(PORT_STATUS_DETECT_MASK, regval)) {
 	case PORT_DETECT_UNKNOWN:
 		return "Unknown device";
 	case PORT_DETECT_SHORT:
@@ -425,9 +448,15 @@ static char *port_detect_status_string(uint8_t status_reg)
 	}
 }
 
-static char *port_class_status_string(uint8_t status_reg)
+static char *tps23861_port_class_status(struct tps23861_data *data, int port)
 {
-	switch (FIELD_GET(PORT_STATUS_CLASS_MASK, status_reg)) {
+	unsigned int regval;
+
+	regmap_read(data->regmap,
+		    PORT_1_STATUS + (port - 1),
+		    &regval);
+
+	switch (FIELD_GET(PORT_STATUS_CLASS_MASK, regval)) {
 	case PORT_CLASS_UNKNOWN:
 		return "Unknown";
 	case PORT_CLASS_RESERVED:
@@ -450,9 +479,16 @@ static char *port_class_status_string(uint8_t status_reg)
 	}
 }
 
-static char *port_poe_plus_status_string(uint8_t poe_plus, unsigned int port)
+static char *tps23861_port_poe_plus_status(struct tps23861_data *data, int port)
 {
-	return (BIT(port + 4) & poe_plus) ? "Yes" : "No";
+	unsigned int regval;
+
+	regmap_read(data->regmap, POE_PLUS, &regval);
+
+	if (BIT(port + 3) & regval)
+		return "Yes";
+	else
+		return "No";
 }
 
 static int tps23861_port_resistance(struct tps23861_data *data, int port)
@@ -461,7 +497,7 @@ static int tps23861_port_resistance(struct tps23861_data *data, int port)
 	__le16 regval;
 
 	regmap_bulk_read(data->regmap,
-			 PORT_1_RESISTANCE_LSB + PORT_N_RESISTANCE_LSB_OFFSET * port,
+			 PORT_1_RESISTANCE_LSB + PORT_N_RESISTANCE_LSB_OFFSET * (port - 1),
 			 &regval,
 			 2);
 
@@ -481,19 +517,14 @@ static int tps23861_port_resistance(struct tps23861_data *data, int port)
 static int tps23861_port_status_show(struct seq_file *s, void *data)
 {
 	struct tps23861_data *priv = s->private;
-	unsigned int i, mode, poe_plus, status;
+	int i;
 
-	regmap_read(priv->regmap, OPERATING_MODE, &mode);
-	regmap_read(priv->regmap, POE_PLUS, &poe_plus);
-
-	for (i = 0; i < TPS23861_NUM_PORTS; i++) {
-		regmap_read(priv->regmap, PORT_1_STATUS + i, &status);
-
-		seq_printf(s, "Port: \t\t%d\n", i + 1);
-		seq_printf(s, "Operating mode: %s\n", port_operating_mode_string(mode, i));
-		seq_printf(s, "Detected: \t%s\n", port_detect_status_string(status));
-		seq_printf(s, "Class: \t\t%s\n", port_class_status_string(status));
-		seq_printf(s, "PoE Plus: \t%s\n", port_poe_plus_status_string(poe_plus, i));
+	for (i = 1; i < TPS23861_NUM_PORTS + 1; i++) {
+		seq_printf(s, "Port: \t\t%d\n", i);
+		seq_printf(s, "Operating mode: %s\n", tps23861_port_operating_mode(priv, i));
+		seq_printf(s, "Detected: \t%s\n", tps23861_port_detect_status(priv, i));
+		seq_printf(s, "Class: \t\t%s\n", tps23861_port_class_status(priv, i));
+		seq_printf(s, "PoE Plus: \t%s\n", tps23861_port_poe_plus_status(priv, i));
 		seq_printf(s, "Resistance: \t%d\n", tps23861_port_resistance(priv, i));
 		seq_putc(s, '\n');
 	}
@@ -503,17 +534,9 @@ static int tps23861_port_status_show(struct seq_file *s, void *data)
 
 DEFINE_SHOW_ATTRIBUTE(tps23861_port_status);
 
-static void tps23861_init_debugfs(struct tps23861_data *data,
-				  struct device *hwmon_dev)
+static void tps23861_init_debugfs(struct tps23861_data *data)
 {
-	const char *debugfs_name;
-
-	debugfs_name = devm_kasprintf(&data->client->dev, GFP_KERNEL, "%s-%s",
-				      data->client->name, dev_name(hwmon_dev));
-	if (!debugfs_name)
-		return;
-
-	data->debugfs_dir = debugfs_create_dir(debugfs_name, NULL);
+	data->debugfs_dir = debugfs_create_dir(data->client->name, NULL);
 
 	debugfs_create_file("port_status",
 			    0400,
@@ -562,16 +585,18 @@ static int tps23861_probe(struct i2c_client *client)
 	if (IS_ERR(hwmon_dev))
 		return PTR_ERR(hwmon_dev);
 
-	tps23861_init_debugfs(data, hwmon_dev);
+	tps23861_init_debugfs(data);
 
 	return 0;
 }
 
-static void tps23861_remove(struct i2c_client *client)
+static int tps23861_remove(struct i2c_client *client)
 {
 	struct tps23861_data *data = i2c_get_clientdata(client);
 
 	debugfs_remove_recursive(data->debugfs_dir);
+
+	return 0;
 }
 
 static const struct of_device_id __maybe_unused tps23861_of_match[] = {

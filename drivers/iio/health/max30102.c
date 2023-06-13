@@ -592,13 +592,15 @@ static int max30102_probe(struct i2c_client *client,
 	return iio_device_register(indio_dev);
 }
 
-static void max30102_remove(struct i2c_client *client)
+static int max30102_remove(struct i2c_client *client)
 {
 	struct iio_dev *indio_dev = i2c_get_clientdata(client);
 	struct max30102_data *data = iio_priv(indio_dev);
 
 	iio_device_unregister(indio_dev);
 	max30102_set_power(data, false);
+
+	return 0;
 }
 
 static const struct i2c_device_id max30102_id[] = {

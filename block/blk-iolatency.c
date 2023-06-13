@@ -292,7 +292,7 @@ static void __blkcg_iolatency_throttle(struct rq_qos *rqos,
 	unsigned use_delay = atomic_read(&lat_to_blkg(iolat)->use_delay);
 
 	if (use_delay)
-		blkcg_schedule_throttle(rqos->q->disk, use_memdelay);
+		blkcg_schedule_throttle(rqos->q, use_memdelay);
 
 	/*
 	 * To avoid priority inversions we want to just take a slot if we are
@@ -756,9 +756,8 @@ static void blkiolatency_enable_work_fn(struct work_struct *work)
 	}
 }
 
-int blk_iolatency_init(struct gendisk *disk)
+int blk_iolatency_init(struct request_queue *q)
 {
-	struct request_queue *q = disk->queue;
 	struct blk_iolatency *blkiolat;
 	struct rq_qos *rqos;
 	int ret;

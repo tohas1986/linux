@@ -90,30 +90,6 @@ static int smu_sys_set_pp_feature_mask(void *handle,
 	return smu_set_pp_feature_mask(smu, new_mask);
 }
 
-int smu_set_residency_gfxoff(struct smu_context *smu, bool value)
-{
-	if (!smu->ppt_funcs->set_gfx_off_residency)
-		return -EINVAL;
-
-	return smu_set_gfx_off_residency(smu, value);
-}
-
-int smu_get_residency_gfxoff(struct smu_context *smu, u32 *value)
-{
-	if (!smu->ppt_funcs->get_gfx_off_residency)
-		return -EINVAL;
-
-	return smu_get_gfx_off_residency(smu, value);
-}
-
-int smu_get_entrycount_gfxoff(struct smu_context *smu, u64 *value)
-{
-	if (!smu->ppt_funcs->get_gfx_off_entrycount)
-		return -EINVAL;
-
-	return smu_get_gfx_off_entrycount(smu, value);
-}
-
 int smu_get_status_gfxoff(struct smu_context *smu, uint32_t *value)
 {
 	if (!smu->ppt_funcs->get_gfx_off_status)
@@ -585,7 +561,6 @@ static int smu_set_funcs(struct amdgpu_device *adev)
 		yellow_carp_set_ppt_funcs(smu);
 		break;
 	case IP_VERSION(13, 0, 4):
-	case IP_VERSION(13, 0, 11):
 		smu_v13_0_4_set_ppt_funcs(smu);
 		break;
 	case IP_VERSION(13, 0, 5):
@@ -606,7 +581,6 @@ static int smu_set_funcs(struct amdgpu_device *adev)
 		smu->od_enabled = true;
 		break;
 	case IP_VERSION(13, 0, 0):
-	case IP_VERSION(13, 0, 10):
 		smu_v13_0_0_set_ppt_funcs(smu);
 		break;
 	case IP_VERSION(13, 0, 7):
@@ -1314,8 +1288,8 @@ static int smu_smc_hw_setup(struct smu_context *smu)
 
 	ret = smu_enable_thermal_alert(smu);
 	if (ret) {
-	  dev_err(adev->dev, "Failed to enable thermal alert!\n");
-	  return ret;
+		dev_err(adev->dev, "Failed to enable thermal alert!\n");
+		return ret;
 	}
 
 	ret = smu_notify_display_change(smu);
@@ -1499,20 +1473,6 @@ static int smu_disable_dpms(struct smu_context *smu)
 	}
 
 	/*
-	 * For SMU 13.0.4/11, PMFW will handle the features disablement properly
-	 * for gpu reset case. Driver involvement is unnecessary.
-	 */
-	if (amdgpu_in_reset(adev)) {
-		switch (adev->ip_versions[MP1_HWIP][0]) {
-		case IP_VERSION(13, 0, 4):
-		case IP_VERSION(13, 0, 11):
-			return 0;
-		default:
-			break;
-		}
-	}
-
-	/*
 	 * For gpu reset, runpm and hibernation through BACO,
 	 * BACO feature has to be kept enabled.
 	 */
@@ -1615,7 +1575,6 @@ static int smu_suspend(void *handle)
 	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
 	struct smu_context *smu = adev->powerplay.pp_handle;
 	int ret;
-	uint64_t count;
 
 	if (amdgpu_sriov_vf(adev)&& !amdgpu_sriov_is_pp_one_vf(adev))
 		return 0;
@@ -1632,14 +1591,6 @@ static int smu_suspend(void *handle)
 	smu->watermarks_bitmap &= ~(WATERMARKS_LOADED);
 
 	smu_set_gfx_cgpg(smu, false);
-
-	/*
-	 * pwfw resets entrycount when device is suspended, so we save the
-	 * last value to be used when we resume to keep it consistent
-	 */
-	ret = smu_get_entrycount_gfxoff(smu, &count);
-	if (!ret)
-		adev->gfx.gfx_off_entrycount = count;
 
 	return 0;
 }

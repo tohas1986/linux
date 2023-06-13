@@ -1472,7 +1472,8 @@ int nicvf_open(struct net_device *netdev)
 		}
 		cq_poll->cq_idx = qidx;
 		cq_poll->nicvf = nic;
-		netif_napi_add(netdev, &cq_poll->napi, nicvf_poll);
+		netif_napi_add(netdev, &cq_poll->napi, nicvf_poll,
+			       NAPI_POLL_WEIGHT);
 		napi_enable(&cq_poll->napi);
 		nic->napi[qidx] = cq_poll;
 	}
@@ -2239,7 +2240,7 @@ static int nicvf_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	err = register_netdev(netdev);
 	if (err) {
 		dev_err(dev, "Failed to register netdevice\n");
-		goto err_destroy_workqueue;
+		goto err_unregister_interrupts;
 	}
 
 	nic->msg_enable = debug;
@@ -2248,8 +2249,6 @@ static int nicvf_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 
 	return 0;
 
-err_destroy_workqueue:
-	destroy_workqueue(nic->nicvf_rx_mode_wq);
 err_unregister_interrupts:
 	nicvf_unregister_interrupts(nic);
 err_free_netdev:

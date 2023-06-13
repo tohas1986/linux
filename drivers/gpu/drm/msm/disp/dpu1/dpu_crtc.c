@@ -412,6 +412,7 @@ static void _dpu_crtc_blend_setup_mixer(struct drm_crtc *crtc,
 	struct dpu_format *format;
 	struct dpu_hw_ctl *ctl = mixer->lm_ctl;
 
+	u32 flush_mask;
 	uint32_t stage_idx, lm_idx;
 	int zpos_cnt[DPU_STAGE_MAX + 1] = { 0 };
 	bool bg_alpha_enable = false;
@@ -419,8 +420,6 @@ static void _dpu_crtc_blend_setup_mixer(struct drm_crtc *crtc,
 
 	memset(fetch_active, 0, sizeof(fetch_active));
 	drm_atomic_crtc_for_each_plane(plane, crtc) {
-		enum dpu_sspp sspp_idx;
-
 		state = plane->state;
 		if (!state)
 			continue;
@@ -431,14 +430,14 @@ static void _dpu_crtc_blend_setup_mixer(struct drm_crtc *crtc,
 		pstate = to_dpu_plane_state(state);
 		fb = state->fb;
 
-		sspp_idx = dpu_plane_pipe(plane);
-		set_bit(sspp_idx, fetch_active);
+		dpu_plane_get_ctl_flush(plane, ctl, &flush_mask);
+		set_bit(dpu_plane_pipe(plane), fetch_active);
 
 		DRM_DEBUG_ATOMIC("crtc %d stage:%d - plane %d sspp %d fb %d\n",
 				crtc->base.id,
 				pstate->stage,
 				plane->base.id,
-				sspp_idx - SSPP_VIG0,
+				dpu_plane_pipe(plane) - SSPP_VIG0,
 				state->fb ? state->fb->base.id : -1);
 
 		format = to_dpu_format(msm_framebuffer_format(pstate->base.fb));
@@ -448,13 +447,13 @@ static void _dpu_crtc_blend_setup_mixer(struct drm_crtc *crtc,
 
 		stage_idx = zpos_cnt[pstate->stage]++;
 		stage_cfg->stage[pstate->stage][stage_idx] =
-					sspp_idx;
+					dpu_plane_pipe(plane);
 		stage_cfg->multirect_index[pstate->stage][stage_idx] =
 					pstate->multirect_index;
 
 		trace_dpu_crtc_setup_mixer(DRMID(crtc), DRMID(plane),
 					   state, pstate, stage_idx,
-					   sspp_idx - SSPP_VIG0,
+					   dpu_plane_pipe(plane) - SSPP_VIG0,
 					   format->base.pixel_format,
 					   fb ? fb->modifier : 0);
 
@@ -463,8 +462,7 @@ static void _dpu_crtc_blend_setup_mixer(struct drm_crtc *crtc,
 			_dpu_crtc_setup_blend_cfg(mixer + lm_idx,
 						pstate, format);
 
-			mixer[lm_idx].lm_ctl->ops.update_pending_flush_sspp(mixer[lm_idx].lm_ctl,
-									    sspp_idx);
+			mixer[lm_idx].flush_mask |= flush_mask;
 
 			if (bg_alpha_enable && !format->alpha_enable)
 				mixer[lm_idx].mixer_op_mode = 0;
@@ -498,6 +496,7 @@ static void _dpu_crtc_blend_setup(struct drm_crtc *crtc)
 
 	for (i = 0; i < cstate->num_mixers; i++) {
 		mixer[i].mixer_op_mode = 0;
+		mixer[i].flush_mask = 0;
 		if (mixer[i].lm_ctl->ops.clear_all_blendstages)
 			mixer[i].lm_ctl->ops.clear_all_blendstages(
 					mixer[i].lm_ctl);
@@ -514,14 +513,17 @@ static void _dpu_crtc_blend_setup(struct drm_crtc *crtc)
 
 		lm->ops.setup_alpha_out(lm, mixer[i].mixer_op_mode);
 
-		/* stage config flush mask */
-		ctl->ops.update_pending_flush_mixer(ctl,
+		mixer[i].flush_mask |= ctl->ops.get_bitmask_mixer(ctl,
 			mixer[i].hw_lm->idx);
 
-		DRM_DEBUG_ATOMIC("lm %d, op_mode 0x%X, ctl %d\n",
+		/* stage config flush mask */
+		ctl->ops.update_pending_flush(ctl, mixer[i].flush_mask);
+
+		DRM_DEBUG_ATOMIC("lm %d, op_mode 0x%X, ctl %d, flush mask 0x%x\n",
 			mixer[i].hw_lm->idx - LM_0,
 			mixer[i].mixer_op_mode,
-			ctl->idx - CTL_0);
+			ctl->idx - CTL_0,
+			mixer[i].flush_mask);
 
 		ctl->ops.setup_blendstage(ctl, mixer[i].hw_lm->idx,
 			&stage_cfg);
@@ -765,9 +767,16 @@ static void _dpu_crtc_setup_cp_blocks(struct drm_crtc *crtc)
 			dspp->ops.setup_pcc(dspp, &cfg);
 		}
 
-		/* stage config flush mask */
-		ctl->ops.update_pending_flush_dspp(ctl,
+		mixer[i].flush_mask |= ctl->ops.get_bitmask_dspp(ctl,
 			mixer[i].hw_dspp->idx);
+
+		/* stage config flush mask */
+		ctl->ops.update_pending_flush(ctl, mixer[i].flush_mask);
+
+		DRM_DEBUG_ATOMIC("lm %d, ctl %d, flush mask 0x%x\n",
+			mixer[i].hw_lm->idx - DSPP_0,
+			ctl->idx - CTL_0,
+			mixer[i].flush_mask);
 	}
 }
 
@@ -1226,8 +1235,17 @@ static int dpu_crtc_atomic_check(struct drm_crtc *crtc,
 	}
 
 	for (i = 1; i < SSPP_MAX; i++) {
-		if (pipe_staged[i])
+		if (pipe_staged[i]) {
 			dpu_plane_clear_multirect(pipe_staged[i]);
+
+			if (is_dpu_plane_virtual(pipe_staged[i]->plane)) {
+				DPU_ERROR(
+					"r1 only virt plane:%d not supported\n",
+					pipe_staged[i]->plane->base.id);
+				rc  = -EINVAL;
+				goto end;
+			}
+		}
 	}
 
 	z_pos = -1;

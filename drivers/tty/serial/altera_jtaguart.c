@@ -9,7 +9,6 @@
  * (C) Copyright 2010, Tobias Klauser <tklauser@distanz.ch>
  */
 
-#include <linux/bitfield.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
@@ -49,6 +48,7 @@
 #define ALTERA_JTAGUART_CONTROL_WI_MSK		0x00000200
 #define ALTERA_JTAGUART_CONTROL_AC_MSK		0x00000400
 #define ALTERA_JTAGUART_CONTROL_WSPACE_MSK	0xFFFF0000
+#define ALTERA_JTAGUART_CONTROL_WSPACE_OFF	16
 
 /*
  * Local per-uart structure.
@@ -59,19 +59,10 @@ struct altera_jtaguart {
 	unsigned long imr;	/* Local IMR mirror */
 };
 
-static unsigned int altera_jtaguart_tx_space(struct uart_port *port, u32 *ctlp)
-{
-	u32 ctl = readl(port->membase + ALTERA_JTAGUART_CONTROL_REG);
-
-	if (ctlp)
-		*ctlp = ctl;
-
-	return FIELD_GET(ALTERA_JTAGUART_CONTROL_WSPACE_MSK, ctl);
-}
-
 static unsigned int altera_jtaguart_tx_empty(struct uart_port *port)
 {
-	return altera_jtaguart_tx_space(port, NULL) ? TIOCSER_TEMT : 0;
+	return (readl(port->membase + ALTERA_JTAGUART_CONTROL_REG) &
+		ALTERA_JTAGUART_CONTROL_WSPACE_MSK) ? TIOCSER_TEMT : 0;
 }
 
 static unsigned int altera_jtaguart_get_mctrl(struct uart_port *port)
@@ -115,8 +106,8 @@ static void altera_jtaguart_break_ctl(struct uart_port *port, int break_state)
 }
 
 static void altera_jtaguart_set_termios(struct uart_port *port,
-				        struct ktermios *termios,
-				        const struct ktermios *old)
+					struct ktermios *termios,
+					struct ktermios *old)
 {
 	/* Just copy the old termios settings back */
 	if (old)
@@ -159,7 +150,9 @@ static void altera_jtaguart_tx_chars(struct altera_jtaguart *pp)
 
 	pending = uart_circ_chars_pending(xmit);
 	if (pending > 0) {
-		count = altera_jtaguart_tx_space(port, NULL);
+		count = (readl(port->membase + ALTERA_JTAGUART_CONTROL_REG) &
+				ALTERA_JTAGUART_CONTROL_WSPACE_MSK) >>
+			ALTERA_JTAGUART_CONTROL_WSPACE_OFF;
 		if (count > pending)
 			count = pending;
 		if (count > 0) {
@@ -305,17 +298,17 @@ static struct altera_jtaguart altera_jtaguart_ports[ALTERA_JTAGUART_MAXPORTS];
 #if defined(CONFIG_SERIAL_ALTERA_JTAGUART_CONSOLE_BYPASS)
 static void altera_jtaguart_console_putc(struct uart_port *port, unsigned char c)
 {
+	unsigned long status;
 	unsigned long flags;
-	u32 status;
 
 	spin_lock_irqsave(&port->lock, flags);
-	while (!altera_jtaguart_tx_space(port, &status)) {
-		spin_unlock_irqrestore(&port->lock, flags);
-
+	while (((status = readl(port->membase + ALTERA_JTAGUART_CONTROL_REG)) &
+		ALTERA_JTAGUART_CONTROL_WSPACE_MSK) == 0) {
 		if ((status & ALTERA_JTAGUART_CONTROL_AC_MSK) == 0) {
+			spin_unlock_irqrestore(&port->lock, flags);
 			return;	/* no connection activity */
 		}
-
+		spin_unlock_irqrestore(&port->lock, flags);
 		cpu_relax();
 		spin_lock_irqsave(&port->lock, flags);
 	}
@@ -328,7 +321,8 @@ static void altera_jtaguart_console_putc(struct uart_port *port, unsigned char c
 	unsigned long flags;
 
 	spin_lock_irqsave(&port->lock, flags);
-	while (!altera_jtaguart_tx_space(port, NULL)) {
+	while ((readl(port->membase + ALTERA_JTAGUART_CONTROL_REG) &
+		ALTERA_JTAGUART_CONTROL_WSPACE_MSK) == 0) {
 		spin_unlock_irqrestore(&port->lock, flags);
 		cpu_relax();
 		spin_lock_irqsave(&port->lock, flags);

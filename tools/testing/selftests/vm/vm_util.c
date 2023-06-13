@@ -42,9 +42,9 @@ void clear_softdirty(void)
 		ksft_exit_fail_msg("writing clear_refs failed\n");
 }
 
-bool check_for_pattern(FILE *fp, const char *pattern, char *buf, size_t len)
+static bool check_for_pattern(FILE *fp, const char *pattern, char *buf)
 {
-	while (fgets(buf, len, fp)) {
+	while (fgets(buf, MAX_LINE_LENGTH, fp) != NULL) {
 		if (!strncmp(buf, pattern, strlen(pattern)))
 			return true;
 	}
@@ -72,10 +72,9 @@ uint64_t read_pmd_pagesize(void)
 	return strtoul(buf, NULL, 10);
 }
 
-bool __check_huge(void *addr, char *pattern, int nr_hpages,
-		  uint64_t hpage_size)
+uint64_t check_huge(void *addr)
 {
-	uint64_t thp = -1;
+	uint64_t thp = 0;
 	int ret;
 	FILE *fp;
 	char buffer[MAX_LINE_LENGTH];
@@ -90,37 +89,20 @@ bool __check_huge(void *addr, char *pattern, int nr_hpages,
 	if (!fp)
 		ksft_exit_fail_msg("%s: Failed to open file %s\n", __func__, SMAP_FILE_PATH);
 
-	if (!check_for_pattern(fp, addr_pattern, buffer, sizeof(buffer)))
+	if (!check_for_pattern(fp, addr_pattern, buffer))
 		goto err_out;
 
 	/*
-	 * Fetch the pattern in the same block and check the number of
+	 * Fetch the AnonHugePages: in the same block and check the number of
 	 * hugepages.
 	 */
-	if (!check_for_pattern(fp, pattern, buffer, sizeof(buffer)))
+	if (!check_for_pattern(fp, "AnonHugePages:", buffer))
 		goto err_out;
 
-	snprintf(addr_pattern, MAX_LINE_LENGTH, "%s%%9ld kB", pattern);
-
-	if (sscanf(buffer, addr_pattern, &thp) != 1)
+	if (sscanf(buffer, "AnonHugePages:%10ld kB", &thp) != 1)
 		ksft_exit_fail_msg("Reading smap error\n");
 
 err_out:
 	fclose(fp);
-	return thp == (nr_hpages * (hpage_size >> 10));
-}
-
-bool check_huge_anon(void *addr, int nr_hpages, uint64_t hpage_size)
-{
-	return __check_huge(addr, "AnonHugePages: ", nr_hpages, hpage_size);
-}
-
-bool check_huge_file(void *addr, int nr_hpages, uint64_t hpage_size)
-{
-	return __check_huge(addr, "FilePmdMapped:", nr_hpages, hpage_size);
-}
-
-bool check_huge_shmem(void *addr, int nr_hpages, uint64_t hpage_size)
-{
-	return __check_huge(addr, "ShmemPmdMapped:", nr_hpages, hpage_size);
+	return thp;
 }

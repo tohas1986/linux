@@ -17,9 +17,10 @@
 #include <linux/cache.h>
 #include <linux/crc32.h>
 #include <linux/mii.h>
-#include <linux/gpio/consumer.h>
 #include <linux/regulator/consumer.h>
 
+#include <linux/gpio.h>
+#include <linux/of_gpio.h>
 #include <linux/of_mdio.h>
 #include <linux/of_net.h>
 
@@ -702,9 +703,9 @@ static const struct net_device_ops ks8851_netdev_ops = {
 static void ks8851_get_drvinfo(struct net_device *dev,
 			       struct ethtool_drvinfo *di)
 {
-	strscpy(di->driver, "KS8851", sizeof(di->driver));
-	strscpy(di->version, "1.00", sizeof(di->version));
-	strscpy(di->bus_info, dev_name(dev->dev.parent), sizeof(di->bus_info));
+	strlcpy(di->driver, "KS8851", sizeof(di->driver));
+	strlcpy(di->version, "1.00", sizeof(di->version));
+	strlcpy(di->bus_info, dev_name(dev->dev.parent), sizeof(di->bus_info));
 }
 
 static u32 ks8851_get_msglevel(struct net_device *dev)
@@ -1116,23 +1117,24 @@ int ks8851_probe_common(struct net_device *netdev, struct device *dev,
 {
 	struct ks8851_net *ks = netdev_priv(netdev);
 	unsigned cider;
+	int gpio;
 	int ret;
 
 	ks->netdev = netdev;
 	ks->tx_space = 6144;
 
-	ks->gpio = devm_gpiod_get_optional(dev, "reset", GPIOD_OUT_HIGH);
-	ret = PTR_ERR_OR_ZERO(ks->gpio);
-	if (ret) {
-		if (ret != -EPROBE_DEFER)
-			dev_err(dev, "reset gpio request failed: %d\n", ret);
-		return ret;
-	}
+	gpio = of_get_named_gpio_flags(dev->of_node, "reset-gpios", 0, NULL);
+	if (gpio == -EPROBE_DEFER)
+		return gpio;
 
-	ret = gpiod_set_consumer_name(ks->gpio, "ks8851_rst_n");
-	if (ret) {
-		dev_err(dev, "failed to set reset gpio name: %d\n", ret);
-		return ret;
+	ks->gpio = gpio;
+	if (gpio_is_valid(gpio)) {
+		ret = devm_gpio_request_one(dev, gpio,
+					    GPIOF_OUT_INIT_LOW, "ks8851_rst_n");
+		if (ret) {
+			dev_err(dev, "reset gpio request failed\n");
+			return ret;
+		}
 	}
 
 	ks->vdd_io = devm_regulator_get(dev, "vdd-io");
@@ -1159,9 +1161,9 @@ int ks8851_probe_common(struct net_device *netdev, struct device *dev,
 		goto err_reg;
 	}
 
-	if (ks->gpio) {
+	if (gpio_is_valid(gpio)) {
 		usleep_range(10000, 11000);
-		gpiod_set_value_cansleep(ks->gpio, 0);
+		gpio_set_value(gpio, 1);
 	}
 
 	spin_lock_init(&ks->statelock);
@@ -1237,8 +1239,8 @@ int ks8851_probe_common(struct net_device *netdev, struct device *dev,
 err_id:
 	ks8851_unregister_mdiobus(ks);
 err_mdio:
-	if (ks->gpio)
-		gpiod_set_value_cansleep(ks->gpio, 1);
+	if (gpio_is_valid(gpio))
+		gpio_set_value(gpio, 0);
 	regulator_disable(ks->vdd_reg);
 err_reg:
 	regulator_disable(ks->vdd_io);
@@ -1257,8 +1259,8 @@ void ks8851_remove_common(struct device *dev)
 		dev_info(dev, "remove\n");
 
 	unregister_netdev(priv->netdev);
-	if (priv->gpio)
-		gpiod_set_value_cansleep(priv->gpio, 1);
+	if (gpio_is_valid(priv->gpio))
+		gpio_set_value(priv->gpio, 0);
 	regulator_disable(priv->vdd_reg);
 	regulator_disable(priv->vdd_io);
 }

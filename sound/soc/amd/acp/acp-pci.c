@@ -62,9 +62,10 @@ static int acp_pci_probe(struct pci_dev *pci, const struct pci_device_id *pci_id
 	if (!chip)
 		return -ENOMEM;
 
-	if (pci_enable_device(pci))
-		return dev_err_probe(&pci->dev, -ENODEV,
-				     "pci_enable_device failed\n");
+	if (pci_enable_device(pci)) {
+		dev_err(&pci->dev, "pci_enable_device failed\n");
+		return -ENODEV;
+	}
 
 	ret = pci_request_regions(pci, "AMD ACP3x audio");
 	if (ret < 0) {
@@ -103,14 +104,16 @@ static int acp_pci_probe(struct pci_dev *pci, const struct pci_device_id *pci_id
 	addr = pci_resource_start(pci, 0);
 	chip->base = devm_ioremap(&pci->dev, addr, pci_resource_len(pci, 0));
 	if (!chip->base) {
+		platform_device_unregister(dmic_dev);
 		ret = -ENOMEM;
-		goto unregister_dmic_dev;
+		goto release_regions;
 	}
 
-	res = devm_kcalloc(&pci->dev, num_res, sizeof(struct resource), GFP_KERNEL);
+	res = devm_kzalloc(&pci->dev, sizeof(struct resource) * num_res, GFP_KERNEL);
 	if (!res) {
+		platform_device_unregister(dmic_dev);
 		ret = -ENOMEM;
-		goto unregister_dmic_dev;
+		goto release_regions;
 	}
 
 	for (i = 0; i < num_res; i++, res_acp++) {
@@ -137,14 +140,13 @@ static int acp_pci_probe(struct pci_dev *pci, const struct pci_device_id *pci_id
 	pdev = platform_device_register_full(&pdevinfo);
 	if (IS_ERR(pdev)) {
 		dev_err(&pci->dev, "cannot register %s device\n", pdevinfo.name);
+		platform_device_unregister(dmic_dev);
 		ret = PTR_ERR(pdev);
-		goto unregister_dmic_dev;
+		goto release_regions;
 	}
 
 	return ret;
 
-unregister_dmic_dev:
-	platform_device_unregister(dmic_dev);
 release_regions:
 	pci_release_regions(pci);
 disable_pci:

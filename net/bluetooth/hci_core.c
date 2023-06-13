@@ -723,7 +723,7 @@ static void hci_update_passive_scan_state(struct hci_dev *hdev, u8 scan)
 		hci_dev_set_flag(hdev, HCI_BREDR_ENABLED);
 
 		if (hci_dev_test_flag(hdev, HCI_LE_ENABLED))
-			hci_update_adv_data(hdev, hdev->cur_adv_instance);
+			hci_req_update_adv_data(hdev, hdev->cur_adv_instance);
 
 		mgmt_new_settings(hdev);
 	}
@@ -1715,8 +1715,7 @@ struct adv_info *hci_add_adv_instance(struct hci_dev *hdev, u8 instance,
 				      u32 flags, u16 adv_data_len, u8 *adv_data,
 				      u16 scan_rsp_len, u8 *scan_rsp_data,
 				      u16 timeout, u16 duration, s8 tx_power,
-				      u32 min_interval, u32 max_interval,
-				      u8 mesh_handle)
+				      u32 min_interval, u32 max_interval)
 {
 	struct adv_info *adv;
 
@@ -1727,7 +1726,7 @@ struct adv_info *hci_add_adv_instance(struct hci_dev *hdev, u8 instance,
 		memset(adv->per_adv_data, 0, sizeof(adv->per_adv_data));
 	} else {
 		if (hdev->adv_instance_cnt >= hdev->le_num_of_adv_sets ||
-		    instance < 1 || instance > hdev->le_num_of_adv_sets + 1)
+		    instance < 1 || instance > hdev->le_num_of_adv_sets)
 			return ERR_PTR(-EOVERFLOW);
 
 		adv = kzalloc(sizeof(*adv), GFP_KERNEL);
@@ -1744,11 +1743,6 @@ struct adv_info *hci_add_adv_instance(struct hci_dev *hdev, u8 instance,
 	adv->min_interval = min_interval;
 	adv->max_interval = max_interval;
 	adv->tx_power = tx_power;
-	/* Defining a mesh_handle changes the timing units to ms,
-	 * rather than seconds, and ties the instance to the requested
-	 * mesh_tx queue.
-	 */
-	adv->mesh = mesh_handle;
 
 	hci_set_adv_instance_data(hdev, instance, adv_data_len, adv_data,
 				  scan_rsp_len, scan_rsp_data);
@@ -1777,7 +1771,7 @@ struct adv_info *hci_add_per_instance(struct hci_dev *hdev, u8 instance,
 
 	adv = hci_add_adv_instance(hdev, instance, flags, 0, NULL, 0, NULL,
 				   0, 0, HCI_ADV_TX_POWER_NO_PREFERENCE,
-				   min_interval, max_interval, 0);
+				   min_interval, max_interval);
 	if (IS_ERR(adv))
 		return adv;
 
@@ -2505,7 +2499,6 @@ struct hci_dev *hci_alloc_dev_priv(int sizeof_priv)
 	mutex_init(&hdev->lock);
 	mutex_init(&hdev->req_lock);
 
-	INIT_LIST_HEAD(&hdev->mesh_pending);
 	INIT_LIST_HEAD(&hdev->mgmt_pending);
 	INIT_LIST_HEAD(&hdev->reject_list);
 	INIT_LIST_HEAD(&hdev->accept_list);
@@ -2660,7 +2653,7 @@ int hci_register_dev(struct hci_dev *hdev)
 
 	error = hci_register_suspend_notifier(hdev);
 	if (error)
-		BT_WARN("register suspend notifier failed error:%d\n", error);
+		goto err_wqueue;
 
 	queue_work(hdev->req_workqueue, &hdev->power_on);
 
@@ -2764,8 +2757,7 @@ int hci_register_suspend_notifier(struct hci_dev *hdev)
 {
 	int ret = 0;
 
-	if (!hdev->suspend_notifier.notifier_call &&
-	    !test_bit(HCI_QUIRK_NO_SUSPEND_NOTIFIER, &hdev->quirks)) {
+	if (!test_bit(HCI_QUIRK_NO_SUSPEND_NOTIFIER, &hdev->quirks)) {
 		hdev->suspend_notifier.notifier_call = hci_suspend_notifier;
 		ret = register_pm_notifier(&hdev->suspend_notifier);
 	}
@@ -2777,11 +2769,8 @@ int hci_unregister_suspend_notifier(struct hci_dev *hdev)
 {
 	int ret = 0;
 
-	if (hdev->suspend_notifier.notifier_call) {
+	if (!test_bit(HCI_QUIRK_NO_SUSPEND_NOTIFIER, &hdev->quirks))
 		ret = unregister_pm_notifier(&hdev->suspend_notifier);
-		if (!ret)
-			hdev->suspend_notifier.notifier_call = NULL;
-	}
 
 	return ret;
 }
@@ -3985,7 +3974,7 @@ void hci_req_cmd_complete(struct hci_dev *hdev, u16 opcode, u8 status,
 			*req_complete_skb = bt_cb(skb)->hci.req_complete_skb;
 		else
 			*req_complete = bt_cb(skb)->hci.req_complete;
-		dev_kfree_skb_irq(skb);
+		kfree_skb(skb);
 	}
 	spin_unlock_irqrestore(&hdev->cmd_q.lock, flags);
 }

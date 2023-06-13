@@ -45,9 +45,7 @@ static struct hid_driver hid_vivaldi = {
 	.id_table = vivaldi_table,
 	.probe = vivaldi_probe,
 	.feature_mapping = vivaldi_feature_mapping,
-	.driver = {
-		.dev_groups = vivaldi_attribute_groups,
-	},
+	.input_configured = vivaldi_input_configured,
 };
 
 module_hid_driver(hid_vivaldi);

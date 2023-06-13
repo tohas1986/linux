@@ -18,6 +18,8 @@
 	};
 };
 
-&blsp1_uart3 {
-	status = "ok";
+&soc {
+	serial@f991f000 {
+		status = "ok";
+	};
 };

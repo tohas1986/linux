@@ -49,8 +49,7 @@ static struct sk_buff *hellcreek_rcv(struct sk_buff *skb,
 		return NULL;
 	}
 
-	if (pskb_trim_rcsum(skb, skb->len - HELLCREEK_TAG_LEN))
-		return NULL;
+	pskb_trim_rcsum(skb, skb->len - HELLCREEK_TAG_LEN);
 
 	dsa_default_offload_fwd_mark(skb);
 

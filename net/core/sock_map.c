@@ -41,7 +41,7 @@ static struct bpf_map *sock_map_alloc(union bpf_attr *attr)
 	    attr->map_flags & ~SOCK_CREATE_FLAG_MASK)
 		return ERR_PTR(-EINVAL);
 
-	stab = bpf_map_area_alloc(sizeof(*stab), NUMA_NO_NODE);
+	stab = kzalloc(sizeof(*stab), GFP_USER | __GFP_ACCOUNT);
 	if (!stab)
 		return ERR_PTR(-ENOMEM);
 
@@ -52,7 +52,7 @@ static struct bpf_map *sock_map_alloc(union bpf_attr *attr)
 				       sizeof(struct sock *),
 				       stab->map.numa_node);
 	if (!stab->sks) {
-		bpf_map_area_free(stab);
+		kfree(stab);
 		return ERR_PTR(-ENOMEM);
 	}
 
@@ -349,13 +349,11 @@ static void sock_map_free(struct bpf_map *map)
 
 		sk = xchg(psk, NULL);
 		if (sk) {
-			sock_hold(sk);
 			lock_sock(sk);
 			rcu_read_lock();
 			sock_map_unref(sk, psk);
 			rcu_read_unlock();
 			release_sock(sk);
-			sock_put(sk);
 		}
 	}
 
@@ -363,7 +361,7 @@ static void sock_map_free(struct bpf_map *map)
 	synchronize_rcu();
 
 	bpf_map_area_free(stab->sks);
-	bpf_map_area_free(stab);
+	kfree(stab);
 }
 
 static void sock_map_release_progs(struct bpf_map *map)
@@ -1087,7 +1085,7 @@ static struct bpf_map *sock_hash_alloc(union bpf_attr *attr)
 	if (attr->key_size > MAX_BPF_STACK)
 		return ERR_PTR(-E2BIG);
 
-	htab = bpf_map_area_alloc(sizeof(*htab), NUMA_NO_NODE);
+	htab = kzalloc(sizeof(*htab), GFP_USER | __GFP_ACCOUNT);
 	if (!htab)
 		return ERR_PTR(-ENOMEM);
 
@@ -1117,7 +1115,7 @@ static struct bpf_map *sock_hash_alloc(union bpf_attr *attr)
 
 	return &htab->map;
 free_htab:
-	bpf_map_area_free(htab);
+	kfree(htab);
 	return ERR_PTR(err);
 }
 
@@ -1170,7 +1168,7 @@ static void sock_hash_free(struct bpf_map *map)
 	synchronize_rcu();
 
 	bpf_map_area_free(htab->buckets);
-	bpf_map_area_free(htab);
+	kfree(htab);
 }
 
 static void *sock_hash_lookup_sys(struct bpf_map *map, void *key)
@@ -1569,16 +1567,15 @@ void sock_map_unhash(struct sock *sk)
 	psock = sk_psock(sk);
 	if (unlikely(!psock)) {
 		rcu_read_unlock();
-		saved_unhash = READ_ONCE(sk->sk_prot)->unhash;
-	} else {
-		saved_unhash = psock->saved_unhash;
-		sock_map_remove_links(sk, psock);
-		rcu_read_unlock();
-	}
-	if (WARN_ON_ONCE(saved_unhash == sock_map_unhash))
+		if (sk->sk_prot->unhash)
+			sk->sk_prot->unhash(sk);
 		return;
-	if (saved_unhash)
-		saved_unhash(sk);
+	}
+
+	saved_unhash = psock->saved_unhash;
+	sock_map_remove_links(sk, psock);
+	rcu_read_unlock();
+	saved_unhash(sk);
 }
 EXPORT_SYMBOL_GPL(sock_map_unhash);
 
@@ -1591,18 +1588,17 @@ void sock_map_destroy(struct sock *sk)
 	psock = sk_psock_get(sk);
 	if (unlikely(!psock)) {
 		rcu_read_unlock();
-		saved_destroy = READ_ONCE(sk->sk_prot)->destroy;
-	} else {
-		saved_destroy = psock->saved_destroy;
-		sock_map_remove_links(sk, psock);
-		rcu_read_unlock();
-		sk_psock_stop(psock);
-		sk_psock_put(sk, psock);
-	}
-	if (WARN_ON_ONCE(saved_destroy == sock_map_destroy))
+		if (sk->sk_prot->destroy)
+			sk->sk_prot->destroy(sk);
 		return;
-	if (saved_destroy)
-		saved_destroy(sk);
+	}
+
+	saved_destroy = psock->saved_destroy;
+	sock_map_remove_links(sk, psock);
+	rcu_read_unlock();
+	sk_psock_stop(psock);
+	sk_psock_put(sk, psock);
+	saved_destroy(sk);
 }
 EXPORT_SYMBOL_GPL(sock_map_destroy);
 
@@ -1617,21 +1613,16 @@ void sock_map_close(struct sock *sk, long timeout)
 	if (unlikely(!psock)) {
 		rcu_read_unlock();
 		release_sock(sk);
-		saved_close = READ_ONCE(sk->sk_prot)->close;
-	} else {
-		saved_close = psock->saved_close;
-		sock_map_remove_links(sk, psock);
-		rcu_read_unlock();
-		sk_psock_stop(psock);
-		release_sock(sk);
-		cancel_work_sync(&psock->work);
-		sk_psock_put(sk, psock);
+		return sk->sk_prot->close(sk, timeout);
 	}
-	/* Make sure we do not recurse. This is a bug.
-	 * Leak the socket instead of crashing on a stack overflow.
-	 */
-	if (WARN_ON_ONCE(saved_close == sock_map_close))
-		return;
+
+	saved_close = psock->saved_close;
+	sock_map_remove_links(sk, psock);
+	rcu_read_unlock();
+	sk_psock_stop(psock);
+	release_sock(sk);
+	cancel_work_sync(&psock->work);
+	sk_psock_put(sk, psock);
 	saved_close(sk, timeout);
 }
 EXPORT_SYMBOL_GPL(sock_map_close);

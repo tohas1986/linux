@@ -28,6 +28,8 @@ properties:
     description: IRQ line for the ADC
     maxItems: 1
 
+  spi-max-frequency: true
+
   adi,voltage-alert-last-chan:
     $ref: /schemas/types.yaml#/definitions/uint32
     description:
@@ -53,10 +55,7 @@ required:
   - compatible
   - reg
 
-allOf:
-  - $ref: /schemas/spi/spi-peripheral-props.yaml#
-
-unevaluatedProperties: false
+additionalProperties: false
 
 examples:
   - |

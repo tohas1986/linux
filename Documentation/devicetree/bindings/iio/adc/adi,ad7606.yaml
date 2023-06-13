@@ -32,6 +32,8 @@ properties:
 
   spi-cpol: true
 
+  spi-max-frequency: true
+
   avcc-supply: true
 
   interrupts:
@@ -103,10 +105,7 @@ required:
   - interrupts
   - adi,conversion-start-gpios
 
-allOf:
-  - $ref: /schemas/spi/spi-peripheral-props.yaml#
-
-unevaluatedProperties: false
+additionalProperties: false
 
 examples:
   - |

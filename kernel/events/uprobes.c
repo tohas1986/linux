@@ -19,7 +19,7 @@
 #include <linux/export.h>
 #include <linux/rmap.h>		/* anon_vma_prepare */
 #include <linux/mmu_notifier.h>	/* set_pte_at_notify */
-#include <linux/swap.h>		/* folio_free_swap */
+#include <linux/swap.h>		/* try_to_free_swap */
 #include <linux/ptrace.h>	/* user_enable_single_step */
 #include <linux/kdebug.h>	/* notifier mechanism */
 #include "../../mm/internal.h"	/* munlock_vma_page */
@@ -154,10 +154,8 @@ static loff_t vaddr_to_offset(struct vm_area_struct *vma, unsigned long vaddr)
 static int __replace_page(struct vm_area_struct *vma, unsigned long addr,
 				struct page *old_page, struct page *new_page)
 {
-	struct folio *old_folio = page_folio(old_page);
-	struct folio *new_folio;
 	struct mm_struct *mm = vma->vm_mm;
-	DEFINE_FOLIO_VMA_WALK(pvmw, old_folio, vma, addr, 0);
+	DEFINE_FOLIO_VMA_WALK(pvmw, page_folio(old_page), vma, addr, 0);
 	int err;
 	struct mmu_notifier_range range;
 
@@ -165,14 +163,14 @@ static int __replace_page(struct vm_area_struct *vma, unsigned long addr,
 				addr + PAGE_SIZE);
 
 	if (new_page) {
-		new_folio = page_folio(new_page);
-		err = mem_cgroup_charge(new_folio, vma->vm_mm, GFP_KERNEL);
+		err = mem_cgroup_charge(page_folio(new_page), vma->vm_mm,
+					GFP_KERNEL);
 		if (err)
 			return err;
 	}
 
-	/* For folio_free_swap() below */
-	folio_lock(old_folio);
+	/* For try_to_free_swap() below */
+	lock_page(old_page);
 
 	mmu_notifier_invalidate_range_start(&range);
 	err = -EAGAIN;
@@ -181,14 +179,14 @@ static int __replace_page(struct vm_area_struct *vma, unsigned long addr,
 	VM_BUG_ON_PAGE(addr != pvmw.address, old_page);
 
 	if (new_page) {
-		folio_get(new_folio);
+		get_page(new_page);
 		page_add_new_anon_rmap(new_page, vma, addr);
-		folio_add_lru_vma(new_folio, vma);
+		lru_cache_add_inactive_or_unevictable(new_page, vma);
 	} else
 		/* no new page, just dec_mm_counter for old_page */
 		dec_mm_counter(mm, MM_ANONPAGES);
 
-	if (!folio_test_anon(old_folio)) {
+	if (!PageAnon(old_page)) {
 		dec_mm_counter(mm, mm_counter_file(old_page));
 		inc_mm_counter(mm, MM_ANONPAGES);
 	}
@@ -200,15 +198,15 @@ static int __replace_page(struct vm_area_struct *vma, unsigned long addr,
 				  mk_pte(new_page, vma->vm_page_prot));
 
 	page_remove_rmap(old_page, vma, false);
-	if (!folio_mapped(old_folio))
-		folio_free_swap(old_folio);
+	if (!page_mapped(old_page))
+		try_to_free_swap(old_page);
 	page_vma_mapped_walk_done(&pvmw);
-	folio_put(old_folio);
+	put_page(old_page);
 
 	err = 0;
  unlock:
 	mmu_notifier_invalidate_range_end(&range);
-	folio_unlock(old_folio);
+	unlock_page(old_page);
 	return err;
 }
 
@@ -351,10 +349,9 @@ static bool valid_ref_ctr_vma(struct uprobe *uprobe,
 static struct vm_area_struct *
 find_ref_ctr_vma(struct uprobe *uprobe, struct mm_struct *mm)
 {
-	VMA_ITERATOR(vmi, mm, 0);
 	struct vm_area_struct *tmp;
 
-	for_each_vma(vmi, tmp)
+	for (tmp = mm->mmap; tmp; tmp = tmp->vm_next)
 		if (valid_ref_ctr_vma(uprobe, tmp))
 			return tmp;
 
@@ -555,7 +552,7 @@ put_old:
 
 	/* try collapse pmd for compound page */
 	if (!ret && orig_page_huge)
-		collapse_pte_mapped_thp(mm, vaddr, false);
+		collapse_pte_mapped_thp(mm, vaddr);
 
 	return ret;
 }
@@ -1234,12 +1231,11 @@ int uprobe_apply(struct inode *inode, loff_t offset,
 
 static int unapply_uprobe(struct uprobe *uprobe, struct mm_struct *mm)
 {
-	VMA_ITERATOR(vmi, mm, 0);
 	struct vm_area_struct *vma;
 	int err = 0;
 
 	mmap_read_lock(mm);
-	for_each_vma(vmi, vma) {
+	for (vma = mm->mmap; vma; vma = vma->vm_next) {
 		unsigned long vaddr;
 		loff_t offset;
 
@@ -1987,10 +1983,9 @@ bool uprobe_deny_signal(void)
 
 static void mmf_recalc_uprobes(struct mm_struct *mm)
 {
-	VMA_ITERATOR(vmi, mm, 0);
 	struct vm_area_struct *vma;
 
-	for_each_vma(vmi, vma) {
+	for (vma = mm->mmap; vma; vma = vma->vm_next) {
 		if (!valid_vma(vma, false))
 			continue;
 		/*

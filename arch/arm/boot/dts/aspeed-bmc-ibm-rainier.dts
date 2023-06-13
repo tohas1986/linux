@@ -220,7 +220,7 @@
 		};
 	};
 
-	iio-hwmon {
+	iio-hwmon-battery {
 		compatible = "iio-hwmon";
 		io-channels = <&adc1 7>;
 	};
@@ -2350,10 +2350,6 @@
 			type = <PCA955X_TYPE_LED>;
 		};
 	};
-};
-
-&uart2 {
-	status = "okay";
 };
 
 &vuart1 {

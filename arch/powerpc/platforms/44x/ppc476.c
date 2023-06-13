@@ -140,8 +140,6 @@ static void __init ppc47x_init_irq(void)
 		ppc_md.get_irq = mpic_get_irq;
 	} else
 		panic("Unrecognized top level interrupt controller");
-
-	of_node_put(np);
 }
 
 #ifdef CONFIG_SMP

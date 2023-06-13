@@ -1166,7 +1166,7 @@ static void tulip_scsi(struct initio_host * host)
 			return;
 		}
 		if (host->jsint & (TSS_FUNC_COMP | TSS_BUS_SERV)) {	/* func complete or Bus service */
-			if (host->active)
+			if ((scb = host->active) != NULL)
 				initio_next_state(host);
 			return;
 		}

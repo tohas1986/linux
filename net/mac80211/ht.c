@@ -241,11 +241,9 @@ bool ieee80211_ht_cap_ie_to_sta_ht_cap(struct ieee80211_sub_if_data *sdata,
 	ht_cap.mcs.rx_highest = ht_cap_ie->mcs.rx_highest;
 
 	if (ht_cap.cap & IEEE80211_HT_CAP_MAX_AMSDU)
-		link_sta->pub->agg.max_amsdu_len = IEEE80211_MAX_MPDU_LEN_HT_7935;
+		sta->sta.max_amsdu_len = IEEE80211_MAX_MPDU_LEN_HT_7935;
 	else
-		link_sta->pub->agg.max_amsdu_len = IEEE80211_MAX_MPDU_LEN_HT_3839;
-
-	ieee80211_sta_recalc_aggregates(&sta->sta);
+		sta->sta.max_amsdu_len = IEEE80211_MAX_MPDU_LEN_HT_3839;
 
  apply:
 	changed = memcmp(&link_sta->pub->ht_cap, &ht_cap, sizeof(ht_cap));
@@ -301,13 +299,12 @@ bool ieee80211_ht_cap_ie_to_sta_ht_cap(struct ieee80211_sub_if_data *sdata,
 			break;
 		}
 
-		if (smps_mode != link_sta->pub->smps_mode)
+		if (smps_mode != sta->sta.smps_mode)
 			changed = true;
-		link_sta->pub->smps_mode = smps_mode;
+		sta->sta.smps_mode = smps_mode;
 	} else {
-		link_sta->pub->smps_mode = IEEE80211_SMPS_OFF;
+		sta->sta.smps_mode = IEEE80211_SMPS_OFF;
 	}
-
 	return changed;
 }
 
@@ -391,43 +388,6 @@ void ieee80211_ba_session_work(struct work_struct *work)
 
 		tid_tx = sta->ampdu_mlme.tid_start_tx[tid];
 		if (!blocked && tid_tx) {
-			struct ieee80211_sub_if_data *sdata = sta->sdata;
-			struct ieee80211_local *local = sdata->local;
-
-			if (local->ops->wake_tx_queue) {
-				struct txq_info *txqi =
-					to_txq_info(sta->sta.txq[tid]);
-				struct fq *fq = &local->fq;
-
-				spin_lock_bh(&fq->lock);
-
-				/* Allow only frags to be dequeued */
-				set_bit(IEEE80211_TXQ_STOP, &txqi->flags);
-
-				if (!skb_queue_empty(&txqi->frags)) {
-					/* Fragmented Tx is ongoing, wait for it
-					 * to finish. Reschedule worker to retry
-					 * later.
-					 */
-
-					spin_unlock_bh(&fq->lock);
-					spin_unlock_bh(&sta->lock);
-
-					/* Give the task working on the txq a
-					 * chance to send out the queued frags
-					 */
-					synchronize_net();
-
-					mutex_unlock(&sta->ampdu_mlme.mtx);
-
-					ieee80211_queue_work(&sdata->local->hw,
-							     work);
-					return;
-				}
-
-				spin_unlock_bh(&fq->lock);
-			}
-
 			/*
 			 * Assign it over to the normal tid_tx array
 			 * where it "goes live".

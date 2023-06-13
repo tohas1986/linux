@@ -73,9 +73,11 @@
 #define UNMAP		      0x42
 #define READ_TOC              0x43
 #define READ_HEADER           0x44
+#define GET_CONFIGURATION     0x46
 #define GET_EVENT_STATUS_NOTIFICATION 0x4a
 #define LOG_SELECT            0x4c
 #define LOG_SENSE             0x4d
+#define READ_DISC_INFORMATION 0x51
 #define XDWRITEREAD_10        0x53
 #define MODE_SELECT_10        0x55
 #define RESERVE_10            0x56

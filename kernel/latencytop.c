@@ -112,7 +112,7 @@ static void __sched
 account_global_scheduler_latency(struct task_struct *tsk,
 				 struct latency_record *lat)
 {
-	int firstnonnull = MAXLR;
+	int firstnonnull = MAXLR + 1;
 	int i;
 
 	/* skip kernel threads for now */
@@ -150,7 +150,7 @@ account_global_scheduler_latency(struct task_struct *tsk,
 	}
 
 	i = firstnonnull;
-	if (i >= MAXLR)
+	if (i >= MAXLR - 1)
 		return;
 
 	/* Allocted a new one: */

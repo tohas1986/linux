@@ -35,8 +35,7 @@
 #endif
 #include <asm/unaligned.h>
 
-static int verify_one_alg(struct nlattr **attrs, enum xfrm_attr_type_t type,
-			  struct netlink_ext_ack *extack)
+static int verify_one_alg(struct nlattr **attrs, enum xfrm_attr_type_t type)
 {
 	struct nlattr *rt = attrs[type];
 	struct xfrm_algo *algp;
@@ -45,10 +44,8 @@ static int verify_one_alg(struct nlattr **attrs, enum xfrm_attr_type_t type,
 		return 0;
 
 	algp = nla_data(rt);
-	if (nla_len(rt) < (int)xfrm_alg_len(algp)) {
-		NL_SET_ERR_MSG(extack, "Invalid AUTH/CRYPT/COMP attribute length");
+	if (nla_len(rt) < (int)xfrm_alg_len(algp))
 		return -EINVAL;
-	}
 
 	switch (type) {
 	case XFRMA_ALG_AUTH:
@@ -57,7 +54,6 @@ static int verify_one_alg(struct nlattr **attrs, enum xfrm_attr_type_t type,
 		break;
 
 	default:
-		NL_SET_ERR_MSG(extack, "Invalid algorithm attribute type");
 		return -EINVAL;
 	}
 
@@ -65,8 +61,7 @@ static int verify_one_alg(struct nlattr **attrs, enum xfrm_attr_type_t type,
 	return 0;
 }
 
-static int verify_auth_trunc(struct nlattr **attrs,
-			     struct netlink_ext_ack *extack)
+static int verify_auth_trunc(struct nlattr **attrs)
 {
 	struct nlattr *rt = attrs[XFRMA_ALG_AUTH_TRUNC];
 	struct xfrm_algo_auth *algp;
@@ -75,16 +70,14 @@ static int verify_auth_trunc(struct nlattr **attrs,
 		return 0;
 
 	algp = nla_data(rt);
-	if (nla_len(rt) < (int)xfrm_alg_auth_len(algp)) {
-		NL_SET_ERR_MSG(extack, "Invalid AUTH_TRUNC attribute length");
+	if (nla_len(rt) < (int)xfrm_alg_auth_len(algp))
 		return -EINVAL;
-	}
 
 	algp->alg_name[sizeof(algp->alg_name) - 1] = '\0';
 	return 0;
 }
 
-static int verify_aead(struct nlattr **attrs, struct netlink_ext_ack *extack)
+static int verify_aead(struct nlattr **attrs)
 {
 	struct nlattr *rt = attrs[XFRMA_ALG_AEAD];
 	struct xfrm_algo_aead *algp;
@@ -93,10 +86,8 @@ static int verify_aead(struct nlattr **attrs, struct netlink_ext_ack *extack)
 		return 0;
 
 	algp = nla_data(rt);
-	if (nla_len(rt) < (int)aead_len(algp)) {
-		NL_SET_ERR_MSG(extack, "Invalid AEAD attribute length");
+	if (nla_len(rt) < (int)aead_len(algp))
 		return -EINVAL;
-	}
 
 	algp->alg_name[sizeof(algp->alg_name) - 1] = '\0';
 	return 0;
@@ -111,7 +102,7 @@ static void verify_one_addr(struct nlattr **attrs, enum xfrm_attr_type_t type,
 		*addrp = nla_data(rt);
 }
 
-static inline int verify_sec_ctx_len(struct nlattr **attrs, struct netlink_ext_ack *extack)
+static inline int verify_sec_ctx_len(struct nlattr **attrs)
 {
 	struct nlattr *rt = attrs[XFRMA_SEC_CTX];
 	struct xfrm_user_sec_ctx *uctx;
@@ -121,59 +112,42 @@ static inline int verify_sec_ctx_len(struct nlattr **attrs, struct netlink_ext_a
 
 	uctx = nla_data(rt);
 	if (uctx->len > nla_len(rt) ||
-	    uctx->len != (sizeof(struct xfrm_user_sec_ctx) + uctx->ctx_len)) {
-		NL_SET_ERR_MSG(extack, "Invalid security context length");
+	    uctx->len != (sizeof(struct xfrm_user_sec_ctx) + uctx->ctx_len))
 		return -EINVAL;
-	}
 
 	return 0;
 }
 
 static inline int verify_replay(struct xfrm_usersa_info *p,
-				struct nlattr **attrs,
-				struct netlink_ext_ack *extack)
+				struct nlattr **attrs)
 {
 	struct nlattr *rt = attrs[XFRMA_REPLAY_ESN_VAL];
 	struct xfrm_replay_state_esn *rs;
 
-	if (!rt) {
-		if (p->flags & XFRM_STATE_ESN) {
-			NL_SET_ERR_MSG(extack, "Missing required attribute for ESN");
-			return -EINVAL;
-		}
-		return 0;
-	}
+	if (!rt)
+		return (p->flags & XFRM_STATE_ESN) ? -EINVAL : 0;
 
 	rs = nla_data(rt);
 
-	if (rs->bmp_len > XFRMA_REPLAY_ESN_MAX / sizeof(rs->bmp[0]) / 8) {
-		NL_SET_ERR_MSG(extack, "ESN bitmap length must be <= 128");
+	if (rs->bmp_len > XFRMA_REPLAY_ESN_MAX / sizeof(rs->bmp[0]) / 8)
 		return -EINVAL;
-	}
 
 	if (nla_len(rt) < (int)xfrm_replay_state_esn_len(rs) &&
-	    nla_len(rt) != sizeof(*rs)) {
-		NL_SET_ERR_MSG(extack, "ESN attribute is too short to fit the full bitmap length");
+	    nla_len(rt) != sizeof(*rs))
 		return -EINVAL;
-	}
 
 	/* As only ESP and AH support ESN feature. */
-	if ((p->id.proto != IPPROTO_ESP) && (p->id.proto != IPPROTO_AH)) {
-		NL_SET_ERR_MSG(extack, "ESN only supported for ESP and AH");
+	if ((p->id.proto != IPPROTO_ESP) && (p->id.proto != IPPROTO_AH))
 		return -EINVAL;
-	}
 
-	if (p->replay_window != 0) {
-		NL_SET_ERR_MSG(extack, "ESN not compatible with legacy replay_window");
+	if (p->replay_window != 0)
 		return -EINVAL;
-	}
 
 	return 0;
 }
 
 static int verify_newsa_info(struct xfrm_usersa_info *p,
-			     struct nlattr **attrs,
-			     struct netlink_ext_ack *extack)
+			     struct nlattr **attrs)
 {
 	int err;
 
@@ -187,12 +161,10 @@ static int verify_newsa_info(struct xfrm_usersa_info *p,
 		break;
 #else
 		err = -EAFNOSUPPORT;
-		NL_SET_ERR_MSG(extack, "IPv6 support disabled");
 		goto out;
 #endif
 
 	default:
-		NL_SET_ERR_MSG(extack, "Invalid address family");
 		goto out;
 	}
 
@@ -201,98 +173,65 @@ static int verify_newsa_info(struct xfrm_usersa_info *p,
 		break;
 
 	case AF_INET:
-		if (p->sel.prefixlen_d > 32 || p->sel.prefixlen_s > 32) {
-			NL_SET_ERR_MSG(extack, "Invalid prefix length in selector (must be <= 32 for IPv4)");
+		if (p->sel.prefixlen_d > 32 || p->sel.prefixlen_s > 32)
 			goto out;
-		}
 
 		break;
 
 	case AF_INET6:
 #if IS_ENABLED(CONFIG_IPV6)
-		if (p->sel.prefixlen_d > 128 || p->sel.prefixlen_s > 128) {
-			NL_SET_ERR_MSG(extack, "Invalid prefix length in selector (must be <= 128 for IPv6)");
+		if (p->sel.prefixlen_d > 128 || p->sel.prefixlen_s > 128)
 			goto out;
-		}
 
 		break;
 #else
-		NL_SET_ERR_MSG(extack, "IPv6 support disabled");
 		err = -EAFNOSUPPORT;
 		goto out;
 #endif
 
 	default:
-		NL_SET_ERR_MSG(extack, "Invalid address family in selector");
 		goto out;
 	}
 
 	err = -EINVAL;
 	switch (p->id.proto) {
 	case IPPROTO_AH:
-		if (!attrs[XFRMA_ALG_AUTH]	&&
-		    !attrs[XFRMA_ALG_AUTH_TRUNC]) {
-			NL_SET_ERR_MSG(extack, "Missing required attribute for AH: AUTH_TRUNC or AUTH");
-			goto out;
-		}
-
-		if (attrs[XFRMA_ALG_AEAD]	||
+		if ((!attrs[XFRMA_ALG_AUTH]	&&
+		     !attrs[XFRMA_ALG_AUTH_TRUNC]) ||
+		    attrs[XFRMA_ALG_AEAD]	||
 		    attrs[XFRMA_ALG_CRYPT]	||
 		    attrs[XFRMA_ALG_COMP]	||
-		    attrs[XFRMA_TFCPAD]) {
-			NL_SET_ERR_MSG(extack, "Invalid attributes for AH: AEAD, CRYPT, COMP, TFCPAD");
+		    attrs[XFRMA_TFCPAD])
 			goto out;
-		}
 		break;
 
 	case IPPROTO_ESP:
-		if (attrs[XFRMA_ALG_COMP]) {
-			NL_SET_ERR_MSG(extack, "Invalid attribute for ESP: COMP");
+		if (attrs[XFRMA_ALG_COMP])
 			goto out;
-		}
-
 		if (!attrs[XFRMA_ALG_AUTH] &&
 		    !attrs[XFRMA_ALG_AUTH_TRUNC] &&
 		    !attrs[XFRMA_ALG_CRYPT] &&
-		    !attrs[XFRMA_ALG_AEAD]) {
-			NL_SET_ERR_MSG(extack, "Missing required attribute for ESP: at least one of AUTH, AUTH_TRUNC, CRYPT, AEAD");
+		    !attrs[XFRMA_ALG_AEAD])
 			goto out;
-		}
-
 		if ((attrs[XFRMA_ALG_AUTH] ||
 		     attrs[XFRMA_ALG_AUTH_TRUNC] ||
 		     attrs[XFRMA_ALG_CRYPT]) &&
-		    attrs[XFRMA_ALG_AEAD]) {
-			NL_SET_ERR_MSG(extack, "Invalid attribute combination for ESP: AEAD can't be used with AUTH, AUTH_TRUNC, CRYPT");
+		    attrs[XFRMA_ALG_AEAD])
 			goto out;
-		}
-
 		if (attrs[XFRMA_TFCPAD] &&
-		    p->mode != XFRM_MODE_TUNNEL) {
-			NL_SET_ERR_MSG(extack, "TFC padding can only be used in tunnel mode");
+		    p->mode != XFRM_MODE_TUNNEL)
 			goto out;
-		}
 		break;
 
 	case IPPROTO_COMP:
-		if (!attrs[XFRMA_ALG_COMP]) {
-			NL_SET_ERR_MSG(extack, "Missing required attribute for COMP: COMP");
-			goto out;
-		}
-
-		if (attrs[XFRMA_ALG_AEAD]	||
+		if (!attrs[XFRMA_ALG_COMP]	||
+		    attrs[XFRMA_ALG_AEAD]	||
 		    attrs[XFRMA_ALG_AUTH]	||
 		    attrs[XFRMA_ALG_AUTH_TRUNC]	||
 		    attrs[XFRMA_ALG_CRYPT]	||
-		    attrs[XFRMA_TFCPAD]) {
-			NL_SET_ERR_MSG(extack, "Invalid attributes for COMP: AEAD, AUTH, AUTH_TRUNC, CRYPT, TFCPAD");
+		    attrs[XFRMA_TFCPAD]		||
+		    (ntohl(p->id.spi) >= 0x10000))
 			goto out;
-		}
-
-		if (ntohl(p->id.spi) >= 0x10000) {
-			NL_SET_ERR_MSG(extack, "SPI is too large for COMP (must be < 0x10000)");
-			goto out;
-		}
 		break;
 
 #if IS_ENABLED(CONFIG_IPV6)
@@ -305,36 +244,29 @@ static int verify_newsa_info(struct xfrm_usersa_info *p,
 		    attrs[XFRMA_ALG_CRYPT]	||
 		    attrs[XFRMA_ENCAP]		||
 		    attrs[XFRMA_SEC_CTX]	||
-		    attrs[XFRMA_TFCPAD]) {
-			NL_SET_ERR_MSG(extack, "Invalid attributes for DSTOPTS/ROUTING");
+		    attrs[XFRMA_TFCPAD]		||
+		    !attrs[XFRMA_COADDR])
 			goto out;
-		}
-
-		if (!attrs[XFRMA_COADDR]) {
-			NL_SET_ERR_MSG(extack, "Missing required COADDR attribute for DSTOPTS/ROUTING");
-			goto out;
-		}
 		break;
 #endif
 
 	default:
-		NL_SET_ERR_MSG(extack, "Unsupported protocol");
 		goto out;
 	}
 
-	if ((err = verify_aead(attrs, extack)))
+	if ((err = verify_aead(attrs)))
 		goto out;
-	if ((err = verify_auth_trunc(attrs, extack)))
+	if ((err = verify_auth_trunc(attrs)))
 		goto out;
-	if ((err = verify_one_alg(attrs, XFRMA_ALG_AUTH, extack)))
+	if ((err = verify_one_alg(attrs, XFRMA_ALG_AUTH)))
 		goto out;
-	if ((err = verify_one_alg(attrs, XFRMA_ALG_CRYPT, extack)))
+	if ((err = verify_one_alg(attrs, XFRMA_ALG_CRYPT)))
 		goto out;
-	if ((err = verify_one_alg(attrs, XFRMA_ALG_COMP, extack)))
+	if ((err = verify_one_alg(attrs, XFRMA_ALG_COMP)))
 		goto out;
-	if ((err = verify_sec_ctx_len(attrs, extack)))
+	if ((err = verify_sec_ctx_len(attrs)))
 		goto out;
-	if ((err = verify_replay(p, attrs, extack)))
+	if ((err = verify_replay(p, attrs)))
 		goto out;
 
 	err = -EINVAL;
@@ -346,19 +278,14 @@ static int verify_newsa_info(struct xfrm_usersa_info *p,
 		break;
 
 	default:
-		NL_SET_ERR_MSG(extack, "Unsupported mode");
 		goto out;
 	}
 
 	err = 0;
 
-	if (attrs[XFRMA_MTIMER_THRESH]) {
-		if (!attrs[XFRMA_ENCAP]) {
-			NL_SET_ERR_MSG(extack, "MTIMER_THRESH attribute can only be set on ENCAP states");
+	if (attrs[XFRMA_MTIMER_THRESH])
+		if (!attrs[XFRMA_ENCAP])
 			err = -EINVAL;
-			goto out;
-		}
-	}
 
 out:
 	return err;
@@ -366,7 +293,7 @@ out:
 
 static int attach_one_algo(struct xfrm_algo **algpp, u8 *props,
 			   struct xfrm_algo_desc *(*get_byname)(const char *, int),
-			   struct nlattr *rta, struct netlink_ext_ack *extack)
+			   struct nlattr *rta)
 {
 	struct xfrm_algo *p, *ualg;
 	struct xfrm_algo_desc *algo;
@@ -377,10 +304,8 @@ static int attach_one_algo(struct xfrm_algo **algpp, u8 *props,
 	ualg = nla_data(rta);
 
 	algo = get_byname(ualg->alg_name, 1);
-	if (!algo) {
-		NL_SET_ERR_MSG(extack, "Requested COMP algorithm not found");
+	if (!algo)
 		return -ENOSYS;
-	}
 	*props = algo->desc.sadb_alg_id;
 
 	p = kmemdup(ualg, xfrm_alg_len(ualg), GFP_KERNEL);
@@ -392,8 +317,7 @@ static int attach_one_algo(struct xfrm_algo **algpp, u8 *props,
 	return 0;
 }
 
-static int attach_crypt(struct xfrm_state *x, struct nlattr *rta,
-			struct netlink_ext_ack *extack)
+static int attach_crypt(struct xfrm_state *x, struct nlattr *rta)
 {
 	struct xfrm_algo *p, *ualg;
 	struct xfrm_algo_desc *algo;
@@ -404,10 +328,8 @@ static int attach_crypt(struct xfrm_state *x, struct nlattr *rta,
 	ualg = nla_data(rta);
 
 	algo = xfrm_ealg_get_byname(ualg->alg_name, 1);
-	if (!algo) {
-		NL_SET_ERR_MSG(extack, "Requested CRYPT algorithm not found");
+	if (!algo)
 		return -ENOSYS;
-	}
 	x->props.ealgo = algo->desc.sadb_alg_id;
 
 	p = kmemdup(ualg, xfrm_alg_len(ualg), GFP_KERNEL);
@@ -421,7 +343,7 @@ static int attach_crypt(struct xfrm_state *x, struct nlattr *rta,
 }
 
 static int attach_auth(struct xfrm_algo_auth **algpp, u8 *props,
-		       struct nlattr *rta, struct netlink_ext_ack *extack)
+		       struct nlattr *rta)
 {
 	struct xfrm_algo *ualg;
 	struct xfrm_algo_auth *p;
@@ -433,10 +355,8 @@ static int attach_auth(struct xfrm_algo_auth **algpp, u8 *props,
 	ualg = nla_data(rta);
 
 	algo = xfrm_aalg_get_byname(ualg->alg_name, 1);
-	if (!algo) {
-		NL_SET_ERR_MSG(extack, "Requested AUTH algorithm not found");
+	if (!algo)
 		return -ENOSYS;
-	}
 	*props = algo->desc.sadb_alg_id;
 
 	p = kmalloc(sizeof(*p) + (ualg->alg_key_len + 7) / 8, GFP_KERNEL);
@@ -453,7 +373,7 @@ static int attach_auth(struct xfrm_algo_auth **algpp, u8 *props,
 }
 
 static int attach_auth_trunc(struct xfrm_algo_auth **algpp, u8 *props,
-			     struct nlattr *rta, struct netlink_ext_ack *extack)
+			     struct nlattr *rta)
 {
 	struct xfrm_algo_auth *p, *ualg;
 	struct xfrm_algo_desc *algo;
@@ -464,14 +384,10 @@ static int attach_auth_trunc(struct xfrm_algo_auth **algpp, u8 *props,
 	ualg = nla_data(rta);
 
 	algo = xfrm_aalg_get_byname(ualg->alg_name, 1);
-	if (!algo) {
-		NL_SET_ERR_MSG(extack, "Requested AUTH_TRUNC algorithm not found");
+	if (!algo)
 		return -ENOSYS;
-	}
-	if (ualg->alg_trunc_len > algo->uinfo.auth.icv_fullbits) {
-		NL_SET_ERR_MSG(extack, "Invalid length requested for truncated ICV");
+	if (ualg->alg_trunc_len > algo->uinfo.auth.icv_fullbits)
 		return -EINVAL;
-	}
 	*props = algo->desc.sadb_alg_id;
 
 	p = kmemdup(ualg, xfrm_alg_auth_len(ualg), GFP_KERNEL);
@@ -486,8 +402,7 @@ static int attach_auth_trunc(struct xfrm_algo_auth **algpp, u8 *props,
 	return 0;
 }
 
-static int attach_aead(struct xfrm_state *x, struct nlattr *rta,
-		       struct netlink_ext_ack *extack)
+static int attach_aead(struct xfrm_state *x, struct nlattr *rta)
 {
 	struct xfrm_algo_aead *p, *ualg;
 	struct xfrm_algo_desc *algo;
@@ -498,10 +413,8 @@ static int attach_aead(struct xfrm_state *x, struct nlattr *rta,
 	ualg = nla_data(rta);
 
 	algo = xfrm_aead_get_byname(ualg->alg_name, ualg->alg_icv_len, 1);
-	if (!algo) {
-		NL_SET_ERR_MSG(extack, "Requested AEAD algorithm not found");
+	if (!algo)
 		return -ENOSYS;
-	}
 	x->props.ealgo = algo->desc.sadb_alg_id;
 
 	p = kmemdup(ualg, aead_len(ualg), GFP_KERNEL);
@@ -666,8 +579,7 @@ static void xfrm_smark_init(struct nlattr **attrs, struct xfrm_mark *m)
 static struct xfrm_state *xfrm_state_construct(struct net *net,
 					       struct xfrm_usersa_info *p,
 					       struct nlattr **attrs,
-					       int *errp,
-					       struct netlink_ext_ack *extack)
+					       int *errp)
 {
 	struct xfrm_state *x = xfrm_state_alloc(net);
 	int err = -ENOMEM;
@@ -694,21 +606,21 @@ static struct xfrm_state *xfrm_state_construct(struct net *net,
 	if (attrs[XFRMA_SA_EXTRA_FLAGS])
 		x->props.extra_flags = nla_get_u32(attrs[XFRMA_SA_EXTRA_FLAGS]);
 
-	if ((err = attach_aead(x, attrs[XFRMA_ALG_AEAD], extack)))
+	if ((err = attach_aead(x, attrs[XFRMA_ALG_AEAD])))
 		goto error;
 	if ((err = attach_auth_trunc(&x->aalg, &x->props.aalgo,
-				     attrs[XFRMA_ALG_AUTH_TRUNC], extack)))
+				     attrs[XFRMA_ALG_AUTH_TRUNC])))
 		goto error;
 	if (!x->props.aalgo) {
 		if ((err = attach_auth(&x->aalg, &x->props.aalgo,
-				       attrs[XFRMA_ALG_AUTH], extack)))
+				       attrs[XFRMA_ALG_AUTH])))
 			goto error;
 	}
-	if ((err = attach_crypt(x, attrs[XFRMA_ALG_CRYPT], extack)))
+	if ((err = attach_crypt(x, attrs[XFRMA_ALG_CRYPT])))
 		goto error;
 	if ((err = attach_one_algo(&x->calg, &x->props.calgo,
 				   xfrm_calg_get_byname,
-				   attrs[XFRMA_ALG_COMP], extack)))
+				   attrs[XFRMA_ALG_COMP])))
 		goto error;
 
 	if (attrs[XFRMA_TFCPAD])
@@ -721,7 +633,7 @@ static struct xfrm_state *xfrm_state_construct(struct net *net,
 	if (attrs[XFRMA_IF_ID])
 		x->if_id = nla_get_u32(attrs[XFRMA_IF_ID]);
 
-	err = __xfrm_init_state(x, false, attrs[XFRMA_OFFLOAD_DEV], extack);
+	err = __xfrm_init_state(x, false, attrs[XFRMA_OFFLOAD_DEV]);
 	if (err)
 		goto error;
 
@@ -741,7 +653,7 @@ static struct xfrm_state *xfrm_state_construct(struct net *net,
 	/* sysctl_xfrm_aevent_etime is in 100ms units */
 	x->replay_maxage = (net->xfrm.sysctl_aevent_etime*HZ)/XFRM_AE_ETH_M;
 
-	if ((err = xfrm_init_replay(x, extack)))
+	if ((err = xfrm_init_replay(x)))
 		goto error;
 
 	/* override default values from above */
@@ -750,8 +662,7 @@ static struct xfrm_state *xfrm_state_construct(struct net *net,
 	/* configure the hardware if offload is requested */
 	if (attrs[XFRMA_OFFLOAD_DEV]) {
 		err = xfrm_dev_state_add(net, x,
-					 nla_data(attrs[XFRMA_OFFLOAD_DEV]),
-					 extack);
+					 nla_data(attrs[XFRMA_OFFLOAD_DEV]));
 		if (err)
 			goto error;
 	}
@@ -767,7 +678,7 @@ error_no_put:
 }
 
 static int xfrm_add_sa(struct sk_buff *skb, struct nlmsghdr *nlh,
-		       struct nlattr **attrs, struct netlink_ext_ack *extack)
+		struct nlattr **attrs)
 {
 	struct net *net = sock_net(skb->sk);
 	struct xfrm_usersa_info *p = nlmsg_data(nlh);
@@ -775,11 +686,11 @@ static int xfrm_add_sa(struct sk_buff *skb, struct nlmsghdr *nlh,
 	int err;
 	struct km_event c;
 
-	err = verify_newsa_info(p, attrs, extack);
+	err = verify_newsa_info(p, attrs);
 	if (err)
 		return err;
 
-	x = xfrm_state_construct(net, p, attrs, &err, extack);
+	x = xfrm_state_construct(net, p, attrs, &err);
 	if (!x)
 		return err;
 
@@ -846,7 +757,7 @@ static struct xfrm_state *xfrm_user_state_lookup(struct net *net,
 }
 
 static int xfrm_del_sa(struct sk_buff *skb, struct nlmsghdr *nlh,
-		       struct nlattr **attrs, struct netlink_ext_ack *extack)
+		struct nlattr **attrs)
 {
 	struct net *net = sock_net(skb->sk);
 	struct xfrm_state *x;
@@ -1343,8 +1254,7 @@ static int build_spdinfo(struct sk_buff *skb, struct net *net,
 }
 
 static int xfrm_set_spdinfo(struct sk_buff *skb, struct nlmsghdr *nlh,
-			    struct nlattr **attrs,
-			    struct netlink_ext_ack *extack)
+			    struct nlattr **attrs)
 {
 	struct net *net = sock_net(skb->sk);
 	struct xfrmu_spdhthresh *thresh4 = NULL;
@@ -1389,8 +1299,7 @@ static int xfrm_set_spdinfo(struct sk_buff *skb, struct nlmsghdr *nlh,
 }
 
 static int xfrm_get_spdinfo(struct sk_buff *skb, struct nlmsghdr *nlh,
-			    struct nlattr **attrs,
-			    struct netlink_ext_ack *extack)
+		struct nlattr **attrs)
 {
 	struct net *net = sock_net(skb->sk);
 	struct sk_buff *r_skb;
@@ -1449,8 +1358,7 @@ static int build_sadinfo(struct sk_buff *skb, struct net *net,
 }
 
 static int xfrm_get_sadinfo(struct sk_buff *skb, struct nlmsghdr *nlh,
-			    struct nlattr **attrs,
-			    struct netlink_ext_ack *extack)
+		struct nlattr **attrs)
 {
 	struct net *net = sock_net(skb->sk);
 	struct sk_buff *r_skb;
@@ -1470,7 +1378,7 @@ static int xfrm_get_sadinfo(struct sk_buff *skb, struct nlmsghdr *nlh,
 }
 
 static int xfrm_get_sa(struct sk_buff *skb, struct nlmsghdr *nlh,
-		       struct nlattr **attrs, struct netlink_ext_ack *extack)
+		struct nlattr **attrs)
 {
 	struct net *net = sock_net(skb->sk);
 	struct xfrm_usersa_id *p = nlmsg_data(nlh);
@@ -1494,8 +1402,7 @@ out_noput:
 }
 
 static int xfrm_alloc_userspi(struct sk_buff *skb, struct nlmsghdr *nlh,
-			      struct nlattr **attrs,
-			      struct netlink_ext_ack *extack)
+		struct nlattr **attrs)
 {
 	struct net *net = sock_net(skb->sk);
 	struct xfrm_state *x;
@@ -1570,7 +1477,7 @@ out_noput:
 	return err;
 }
 
-static int verify_policy_dir(u8 dir, struct netlink_ext_ack *extack)
+static int verify_policy_dir(u8 dir)
 {
 	switch (dir) {
 	case XFRM_POLICY_IN:
@@ -1579,14 +1486,13 @@ static int verify_policy_dir(u8 dir, struct netlink_ext_ack *extack)
 		break;
 
 	default:
-		NL_SET_ERR_MSG(extack, "Invalid policy direction");
 		return -EINVAL;
 	}
 
 	return 0;
 }
 
-static int verify_policy_type(u8 type, struct netlink_ext_ack *extack)
+static int verify_policy_type(u8 type)
 {
 	switch (type) {
 	case XFRM_POLICY_TYPE_MAIN:
@@ -1596,15 +1502,13 @@ static int verify_policy_type(u8 type, struct netlink_ext_ack *extack)
 		break;
 
 	default:
-		NL_SET_ERR_MSG(extack, "Invalid policy type");
 		return -EINVAL;
 	}
 
 	return 0;
 }
 
-static int verify_newpolicy_info(struct xfrm_userpolicy_info *p,
-				 struct netlink_ext_ack *extack)
+static int verify_newpolicy_info(struct xfrm_userpolicy_info *p)
 {
 	int ret;
 
@@ -1616,7 +1520,6 @@ static int verify_newpolicy_info(struct xfrm_userpolicy_info *p,
 		break;
 
 	default:
-		NL_SET_ERR_MSG(extack, "Invalid policy share");
 		return -EINVAL;
 	}
 
@@ -1626,44 +1529,35 @@ static int verify_newpolicy_info(struct xfrm_userpolicy_info *p,
 		break;
 
 	default:
-		NL_SET_ERR_MSG(extack, "Invalid policy action");
 		return -EINVAL;
 	}
 
 	switch (p->sel.family) {
 	case AF_INET:
-		if (p->sel.prefixlen_d > 32 || p->sel.prefixlen_s > 32) {
-			NL_SET_ERR_MSG(extack, "Invalid prefix length in selector (must be <= 32 for IPv4)");
+		if (p->sel.prefixlen_d > 32 || p->sel.prefixlen_s > 32)
 			return -EINVAL;
-		}
 
 		break;
 
 	case AF_INET6:
 #if IS_ENABLED(CONFIG_IPV6)
-		if (p->sel.prefixlen_d > 128 || p->sel.prefixlen_s > 128) {
-			NL_SET_ERR_MSG(extack, "Invalid prefix length in selector (must be <= 128 for IPv6)");
+		if (p->sel.prefixlen_d > 128 || p->sel.prefixlen_s > 128)
 			return -EINVAL;
-		}
 
 		break;
 #else
-		NL_SET_ERR_MSG(extack, "IPv6 support disabled");
 		return  -EAFNOSUPPORT;
 #endif
 
 	default:
-		NL_SET_ERR_MSG(extack, "Invalid selector family");
 		return -EINVAL;
 	}
 
-	ret = verify_policy_dir(p->dir, extack);
+	ret = verify_policy_dir(p->dir);
 	if (ret)
 		return ret;
-	if (p->index && (xfrm_policy_id2dir(p->index) != p->dir)) {
-		NL_SET_ERR_MSG(extack, "Policy index doesn't match direction");
+	if (p->index && (xfrm_policy_id2dir(p->index) != p->dir))
 		return -EINVAL;
-	}
 
 	return 0;
 }
@@ -1705,16 +1599,13 @@ static void copy_templates(struct xfrm_policy *xp, struct xfrm_user_tmpl *ut,
 	}
 }
 
-static int validate_tmpl(int nr, struct xfrm_user_tmpl *ut, u16 family,
-			 struct netlink_ext_ack *extack)
+static int validate_tmpl(int nr, struct xfrm_user_tmpl *ut, u16 family)
 {
 	u16 prev_family;
 	int i;
 
-	if (nr > XFRM_MAX_DEPTH) {
-		NL_SET_ERR_MSG(extack, "Template count must be <= XFRM_MAX_DEPTH (" __stringify(XFRM_MAX_DEPTH) ")");
+	if (nr > XFRM_MAX_DEPTH)
 		return -EINVAL;
-	}
 
 	prev_family = family;
 
@@ -1734,16 +1625,12 @@ static int validate_tmpl(int nr, struct xfrm_user_tmpl *ut, u16 family,
 		case XFRM_MODE_BEET:
 			break;
 		default:
-			if (ut[i].family != prev_family) {
-				NL_SET_ERR_MSG(extack, "Mode in template doesn't support a family change");
+			if (ut[i].family != prev_family)
 				return -EINVAL;
-			}
 			break;
 		}
-		if (ut[i].mode >= XFRM_MODE_MAX) {
-			NL_SET_ERR_MSG(extack, "Mode in template must be < XFRM_MODE_MAX (" __stringify(XFRM_MODE_MAX) ")");
+		if (ut[i].mode >= XFRM_MODE_MAX)
 			return -EINVAL;
-		}
 
 		prev_family = ut[i].family;
 
@@ -1755,21 +1642,17 @@ static int validate_tmpl(int nr, struct xfrm_user_tmpl *ut, u16 family,
 			break;
 #endif
 		default:
-			NL_SET_ERR_MSG(extack, "Invalid family in template");
 			return -EINVAL;
 		}
 
-		if (!xfrm_id_proto_valid(ut[i].id.proto)) {
-			NL_SET_ERR_MSG(extack, "Invalid XFRM protocol in template");
+		if (!xfrm_id_proto_valid(ut[i].id.proto))
 			return -EINVAL;
-		}
 	}
 
 	return 0;
 }
 
-static int copy_from_user_tmpl(struct xfrm_policy *pol, struct nlattr **attrs,
-			       struct netlink_ext_ack *extack)
+static int copy_from_user_tmpl(struct xfrm_policy *pol, struct nlattr **attrs)
 {
 	struct nlattr *rt = attrs[XFRMA_TMPL];
 
@@ -1780,7 +1663,7 @@ static int copy_from_user_tmpl(struct xfrm_policy *pol, struct nlattr **attrs,
 		int nr = nla_len(rt) / sizeof(*utmpl);
 		int err;
 
-		err = validate_tmpl(nr, utmpl, pol->family, extack);
+		err = validate_tmpl(nr, utmpl, pol->family);
 		if (err)
 			return err;
 
@@ -1789,8 +1672,7 @@ static int copy_from_user_tmpl(struct xfrm_policy *pol, struct nlattr **attrs,
 	return 0;
 }
 
-static int copy_from_user_policy_type(u8 *tp, struct nlattr **attrs,
-				      struct netlink_ext_ack *extack)
+static int copy_from_user_policy_type(u8 *tp, struct nlattr **attrs)
 {
 	struct nlattr *rt = attrs[XFRMA_POLICY_TYPE];
 	struct xfrm_userpolicy_type *upt;
@@ -1802,7 +1684,7 @@ static int copy_from_user_policy_type(u8 *tp, struct nlattr **attrs,
 		type = upt->type;
 	}
 
-	err = verify_policy_type(type, extack);
+	err = verify_policy_type(type);
 	if (err)
 		return err;
 
@@ -1837,11 +1719,7 @@ static void copy_to_user_policy(struct xfrm_policy *xp, struct xfrm_userpolicy_i
 	p->share = XFRM_SHARE_ANY; /* XXX xp->share */
 }
 
-static struct xfrm_policy *xfrm_policy_construct(struct net *net,
-						 struct xfrm_userpolicy_info *p,
-						 struct nlattr **attrs,
-						 int *errp,
-						 struct netlink_ext_ack *extack)
+static struct xfrm_policy *xfrm_policy_construct(struct net *net, struct xfrm_userpolicy_info *p, struct nlattr **attrs, int *errp)
 {
 	struct xfrm_policy *xp = xfrm_policy_alloc(net, GFP_KERNEL);
 	int err;
@@ -1853,11 +1731,11 @@ static struct xfrm_policy *xfrm_policy_construct(struct net *net,
 
 	copy_from_user_policy(xp, p);
 
-	err = copy_from_user_policy_type(&xp->type, attrs, extack);
+	err = copy_from_user_policy_type(&xp->type, attrs);
 	if (err)
 		goto error;
 
-	if (!(err = copy_from_user_tmpl(xp, attrs, extack)))
+	if (!(err = copy_from_user_tmpl(xp, attrs)))
 		err = copy_from_user_sec_ctx(xp, attrs);
 	if (err)
 		goto error;
@@ -1876,8 +1754,7 @@ static struct xfrm_policy *xfrm_policy_construct(struct net *net,
 }
 
 static int xfrm_add_policy(struct sk_buff *skb, struct nlmsghdr *nlh,
-			   struct nlattr **attrs,
-			   struct netlink_ext_ack *extack)
+		struct nlattr **attrs)
 {
 	struct net *net = sock_net(skb->sk);
 	struct xfrm_userpolicy_info *p = nlmsg_data(nlh);
@@ -1886,14 +1763,14 @@ static int xfrm_add_policy(struct sk_buff *skb, struct nlmsghdr *nlh,
 	int err;
 	int excl;
 
-	err = verify_newpolicy_info(p, extack);
+	err = verify_newpolicy_info(p);
 	if (err)
 		return err;
-	err = verify_sec_ctx_len(attrs, extack);
+	err = verify_sec_ctx_len(attrs);
 	if (err)
 		return err;
 
-	xp = xfrm_policy_construct(net, p, attrs, &err, extack);
+	xp = xfrm_policy_construct(net, p, attrs, &err);
 	if (!xp)
 		return err;
 
@@ -2138,7 +2015,7 @@ static bool xfrm_userpolicy_is_valid(__u8 policy)
 }
 
 static int xfrm_set_default(struct sk_buff *skb, struct nlmsghdr *nlh,
-			    struct nlattr **attrs, struct netlink_ext_ack *extack)
+			    struct nlattr **attrs)
 {
 	struct net *net = sock_net(skb->sk);
 	struct xfrm_userpolicy_default *up = nlmsg_data(nlh);
@@ -2159,7 +2036,7 @@ static int xfrm_set_default(struct sk_buff *skb, struct nlmsghdr *nlh,
 }
 
 static int xfrm_get_default(struct sk_buff *skb, struct nlmsghdr *nlh,
-			    struct nlattr **attrs, struct netlink_ext_ack *extack)
+			    struct nlattr **attrs)
 {
 	struct sk_buff *r_skb;
 	struct nlmsghdr *r_nlh;
@@ -2189,8 +2066,7 @@ static int xfrm_get_default(struct sk_buff *skb, struct nlmsghdr *nlh,
 }
 
 static int xfrm_get_policy(struct sk_buff *skb, struct nlmsghdr *nlh,
-			   struct nlattr **attrs,
-			   struct netlink_ext_ack *extack)
+		struct nlattr **attrs)
 {
 	struct net *net = sock_net(skb->sk);
 	struct xfrm_policy *xp;
@@ -2205,11 +2081,11 @@ static int xfrm_get_policy(struct sk_buff *skb, struct nlmsghdr *nlh,
 	p = nlmsg_data(nlh);
 	delete = nlh->nlmsg_type == XFRM_MSG_DELPOLICY;
 
-	err = copy_from_user_policy_type(&type, attrs, extack);
+	err = copy_from_user_policy_type(&type, attrs);
 	if (err)
 		return err;
 
-	err = verify_policy_dir(p->dir, extack);
+	err = verify_policy_dir(p->dir);
 	if (err)
 		return err;
 
@@ -2225,7 +2101,7 @@ static int xfrm_get_policy(struct sk_buff *skb, struct nlmsghdr *nlh,
 		struct nlattr *rt = attrs[XFRMA_SEC_CTX];
 		struct xfrm_sec_ctx *ctx;
 
-		err = verify_sec_ctx_len(attrs, extack);
+		err = verify_sec_ctx_len(attrs);
 		if (err)
 			return err;
 
@@ -2273,8 +2149,7 @@ out:
 }
 
 static int xfrm_flush_sa(struct sk_buff *skb, struct nlmsghdr *nlh,
-			 struct nlattr **attrs,
-			 struct netlink_ext_ack *extack)
+		struct nlattr **attrs)
 {
 	struct net *net = sock_net(skb->sk);
 	struct km_event c;
@@ -2374,7 +2249,7 @@ out_cancel:
 }
 
 static int xfrm_get_ae(struct sk_buff *skb, struct nlmsghdr *nlh,
-		       struct nlattr **attrs, struct netlink_ext_ack *extack)
+		struct nlattr **attrs)
 {
 	struct net *net = sock_net(skb->sk);
 	struct xfrm_state *x;
@@ -2418,7 +2293,7 @@ static int xfrm_get_ae(struct sk_buff *skb, struct nlmsghdr *nlh,
 }
 
 static int xfrm_new_ae(struct sk_buff *skb, struct nlmsghdr *nlh,
-		       struct nlattr **attrs, struct netlink_ext_ack *extack)
+		struct nlattr **attrs)
 {
 	struct net *net = sock_net(skb->sk);
 	struct xfrm_state *x;
@@ -2469,15 +2344,14 @@ out:
 }
 
 static int xfrm_flush_policy(struct sk_buff *skb, struct nlmsghdr *nlh,
-			     struct nlattr **attrs,
-			     struct netlink_ext_ack *extack)
+		struct nlattr **attrs)
 {
 	struct net *net = sock_net(skb->sk);
 	struct km_event c;
 	u8 type = XFRM_POLICY_TYPE_MAIN;
 	int err;
 
-	err = copy_from_user_policy_type(&type, attrs, extack);
+	err = copy_from_user_policy_type(&type, attrs);
 	if (err)
 		return err;
 
@@ -2498,8 +2372,7 @@ static int xfrm_flush_policy(struct sk_buff *skb, struct nlmsghdr *nlh,
 }
 
 static int xfrm_add_pol_expire(struct sk_buff *skb, struct nlmsghdr *nlh,
-			       struct nlattr **attrs,
-			       struct netlink_ext_ack *extack)
+		struct nlattr **attrs)
 {
 	struct net *net = sock_net(skb->sk);
 	struct xfrm_policy *xp;
@@ -2510,11 +2383,11 @@ static int xfrm_add_pol_expire(struct sk_buff *skb, struct nlmsghdr *nlh,
 	struct xfrm_mark m;
 	u32 if_id = 0;
 
-	err = copy_from_user_policy_type(&type, attrs, extack);
+	err = copy_from_user_policy_type(&type, attrs);
 	if (err)
 		return err;
 
-	err = verify_policy_dir(p->dir, extack);
+	err = verify_policy_dir(p->dir);
 	if (err)
 		return err;
 
@@ -2530,7 +2403,7 @@ static int xfrm_add_pol_expire(struct sk_buff *skb, struct nlmsghdr *nlh,
 		struct nlattr *rt = attrs[XFRMA_SEC_CTX];
 		struct xfrm_sec_ctx *ctx;
 
-		err = verify_sec_ctx_len(attrs, extack);
+		err = verify_sec_ctx_len(attrs);
 		if (err)
 			return err;
 
@@ -2565,8 +2438,7 @@ out:
 }
 
 static int xfrm_add_sa_expire(struct sk_buff *skb, struct nlmsghdr *nlh,
-			      struct nlattr **attrs,
-			      struct netlink_ext_ack *extack)
+		struct nlattr **attrs)
 {
 	struct net *net = sock_net(skb->sk);
 	struct xfrm_state *x;
@@ -2600,8 +2472,7 @@ out:
 }
 
 static int xfrm_add_acquire(struct sk_buff *skb, struct nlmsghdr *nlh,
-			    struct nlattr **attrs,
-			    struct netlink_ext_ack *extack)
+		struct nlattr **attrs)
 {
 	struct net *net = sock_net(skb->sk);
 	struct xfrm_policy *xp;
@@ -2619,15 +2490,15 @@ static int xfrm_add_acquire(struct sk_buff *skb, struct nlmsghdr *nlh,
 
 	xfrm_mark_get(attrs, &mark);
 
-	err = verify_newpolicy_info(&ua->policy, extack);
+	err = verify_newpolicy_info(&ua->policy);
 	if (err)
 		goto free_state;
-	err = verify_sec_ctx_len(attrs, extack);
+	err = verify_sec_ctx_len(attrs);
 	if (err)
 		goto free_state;
 
 	/*   build an XP */
-	xp = xfrm_policy_construct(net, &ua->policy, attrs, &err, extack);
+	xp = xfrm_policy_construct(net, &ua->policy, attrs, &err);
 	if (!xp)
 		goto free_state;
 
@@ -2706,7 +2577,7 @@ static int copy_from_user_migrate(struct xfrm_migrate *ma,
 }
 
 static int xfrm_do_migrate(struct sk_buff *skb, struct nlmsghdr *nlh,
-			   struct nlattr **attrs, struct netlink_ext_ack *extack)
+			   struct nlattr **attrs)
 {
 	struct xfrm_userpolicy_id *pi = nlmsg_data(nlh);
 	struct xfrm_migrate m[XFRM_MAX_DEPTH];
@@ -2723,7 +2594,7 @@ static int xfrm_do_migrate(struct sk_buff *skb, struct nlmsghdr *nlh,
 
 	kmp = attrs[XFRMA_KMADDRESS] ? &km : NULL;
 
-	err = copy_from_user_policy_type(&type, attrs, extack);
+	err = copy_from_user_policy_type(&type, attrs);
 	if (err)
 		return err;
 
@@ -2752,7 +2623,7 @@ static int xfrm_do_migrate(struct sk_buff *skb, struct nlmsghdr *nlh,
 }
 #else
 static int xfrm_do_migrate(struct sk_buff *skb, struct nlmsghdr *nlh,
-			   struct nlattr **attrs, struct netlink_ext_ack *extack)
+			   struct nlattr **attrs)
 {
 	return -ENOPROTOOPT;
 }
@@ -2948,8 +2819,7 @@ static const struct nla_policy xfrma_spd_policy[XFRMA_SPD_MAX+1] = {
 };
 
 static const struct xfrm_link {
-	int (*doit)(struct sk_buff *, struct nlmsghdr *, struct nlattr **,
-		    struct netlink_ext_ack *);
+	int (*doit)(struct sk_buff *, struct nlmsghdr *, struct nlattr **);
 	int (*start)(struct netlink_callback *);
 	int (*dump)(struct sk_buff *, struct netlink_callback *);
 	int (*done)(struct netlink_callback *);
@@ -3051,7 +2921,7 @@ static int xfrm_user_rcv_msg(struct sk_buff *skb, struct nlmsghdr *nlh,
 		goto err;
 	}
 
-	err = link->doit(skb, nlh, attrs, extack);
+	err = link->doit(skb, nlh, attrs);
 
 	/* We need to free skb allocated in xfrm_alloc_compat() before
 	 * returning from this function, because consume_skb() won't take
@@ -3402,11 +3272,11 @@ static struct xfrm_policy *xfrm_compile_policy(struct sock *sk, int opt,
 	*dir = -EINVAL;
 
 	if (len < sizeof(*p) ||
-	    verify_newpolicy_info(p, NULL))
+	    verify_newpolicy_info(p))
 		return NULL;
 
 	nr = ((len - sizeof(*p)) / sizeof(*ut));
-	if (validate_tmpl(nr, ut, p->sel.family, NULL))
+	if (validate_tmpl(nr, ut, p->sel.family))
 		return NULL;
 
 	if (p->dir > XFRM_POLICY_OUT)

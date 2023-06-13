@@ -228,6 +228,5 @@ int mtk_register_reset_controller_with_dev(struct device *dev,
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(mtk_register_reset_controller_with_dev);
 
 MODULE_LICENSE("GPL");

@@ -39,7 +39,6 @@ struct asoc_simple_dai {
 struct asoc_simple_data {
 	u32 convert_rate;
 	u32 convert_channels;
-	const char *convert_sample_format;
 };
 
 struct asoc_simple_jack {
@@ -177,7 +176,6 @@ void asoc_simple_convert_fixup(struct asoc_simple_data *data,
 				      struct snd_pcm_hw_params *params);
 void asoc_simple_parse_convert(struct device_node *np, char *prefix,
 			       struct asoc_simple_data *data);
-bool asoc_simple_is_convert_required(const struct asoc_simple_data *data);
 
 int asoc_simple_parse_routing(struct snd_soc_card *card,
 				      char *prefix);

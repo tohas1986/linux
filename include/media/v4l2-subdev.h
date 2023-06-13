@@ -358,11 +358,7 @@ struct v4l2_mbus_frame_desc_entry {
 	} bus;
 };
 
- /*
-  * If this number is too small, it should be dropped altogether and the
-  * API switched to a dynamic number of frame descriptor entries.
-  */
-#define V4L2_FRAME_DESC_ENTRY_MAX	8
+#define V4L2_FRAME_DESC_ENTRY_MAX	4
 
 /**
  * enum v4l2_mbus_frame_desc_type - media bus frame description type

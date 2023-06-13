@@ -586,7 +586,7 @@ static int gl518_detect(struct i2c_client *client, struct i2c_board_info *info)
 	if (rev != 0x00 && rev != 0x80)
 		return -ENODEV;
 
-	strscpy(info->type, "gl518sm", I2C_NAME_SIZE);
+	strlcpy(info->type, "gl518sm", I2C_NAME_SIZE);
 
 	return 0;
 }

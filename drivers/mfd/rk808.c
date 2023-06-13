@@ -67,10 +67,6 @@ static bool rk817_is_volatile_reg(struct device *dev, unsigned int reg)
 	case RK817_SECONDS_REG ... RK817_WEEKS_REG:
 	case RK817_RTC_STATUS_REG:
 	case RK817_CODEC_DTOP_LPT_SRST:
-	case RK817_GAS_GAUGE_ADC_CONFIG0 ... RK817_GAS_GAUGE_CUR_ADC_K0:
-	case RK817_PMIC_CHRG_STS:
-	case RK817_PMIC_CHRG_OUT:
-	case RK817_PMIC_CHRG_IN:
 	case RK817_INT_STS_REG0:
 	case RK817_INT_STS_REG1:
 	case RK817_INT_STS_REG2:
@@ -78,7 +74,7 @@ static bool rk817_is_volatile_reg(struct device *dev, unsigned int reg)
 		return true;
 	}
 
-	return false;
+	return true;
 }
 
 static const struct regmap_config rk818_regmap_config = {
@@ -131,11 +127,6 @@ static const struct resource rk817_pwrkey_resources[] = {
 	DEFINE_RES_IRQ(RK817_IRQ_PWRON_FALL),
 };
 
-static const struct resource rk817_charger_resources[] = {
-	DEFINE_RES_IRQ(RK817_IRQ_PLUG_IN),
-	DEFINE_RES_IRQ(RK817_IRQ_PLUG_OUT),
-};
-
 static const struct mfd_cell rk805s[] = {
 	{ .name = "rk808-clkout", },
 	{ .name = "rk808-regulator", },
@@ -175,11 +166,6 @@ static const struct mfd_cell rk817s[] = {
 		.resources = &rk817_rtc_resources[0],
 	},
 	{ .name = "rk817-codec",},
-	{
-		.name = "rk817-charger",
-		.num_resources = ARRAY_SIZE(rk817_charger_resources),
-		.resources = &rk817_charger_resources[0],
-	},
 };
 
 static const struct mfd_cell rk818s[] = {
@@ -792,7 +778,7 @@ err_irq:
 	return ret;
 }
 
-static void rk808_remove(struct i2c_client *client)
+static int rk808_remove(struct i2c_client *client)
 {
 	struct rk808 *rk808 = i2c_get_clientdata(client);
 
@@ -806,6 +792,8 @@ static void rk808_remove(struct i2c_client *client)
 		pm_power_off = NULL;
 
 	unregister_restart_handler(&rk808_restart_handler);
+
+	return 0;
 }
 
 static int __maybe_unused rk8xx_suspend(struct device *dev)

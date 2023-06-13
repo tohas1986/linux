@@ -7,7 +7,6 @@
 
 #include <linux/init.h>
 #include <linux/sched.h>
-#include <linux/kstrtox.h>
 #include <linux/mm.h>
 #include <linux/pm.h>
 #include <linux/memblock.h>
@@ -86,7 +85,7 @@ static void __init xen_parse_512gb(void)
 	arg = strstr(xen_start_info->cmd_line, "xen_512gb_limit=");
 	if (!arg)
 		val = true;
-	else if (kstrtobool(arg + strlen("xen_512gb_limit="), &val))
+	else if (strtobool(arg + strlen("xen_512gb_limit="), &val))
 		return;
 
 	xen_512gb_limit = val;
@@ -911,9 +910,17 @@ static int register_callback(unsigned type, const void *func)
 
 void xen_enable_sysenter(void)
 {
-	if (cpu_feature_enabled(X86_FEATURE_SYSENTER32) &&
-	    register_callback(CALLBACKTYPE_sysenter, xen_entry_SYSENTER_compat))
-		setup_clear_cpu_cap(X86_FEATURE_SYSENTER32);
+	int ret;
+	unsigned sysenter_feature;
+
+	sysenter_feature = X86_FEATURE_SYSENTER32;
+
+	if (!boot_cpu_has(sysenter_feature))
+		return;
+
+	ret = register_callback(CALLBACKTYPE_sysenter, xen_entry_SYSENTER_compat);
+	if(ret != 0)
+		setup_clear_cpu_cap(sysenter_feature);
 }
 
 void xen_enable_syscall(void)
@@ -927,9 +934,12 @@ void xen_enable_syscall(void)
 		   mechanism for syscalls. */
 	}
 
-	if (cpu_feature_enabled(X86_FEATURE_SYSCALL32) &&
-	    register_callback(CALLBACKTYPE_syscall32, xen_entry_SYSCALL_compat))
-		setup_clear_cpu_cap(X86_FEATURE_SYSCALL32);
+	if (boot_cpu_has(X86_FEATURE_SYSCALL32)) {
+		ret = register_callback(CALLBACKTYPE_syscall32,
+					xen_entry_SYSCALL_compat);
+		if (ret != 0)
+			setup_clear_cpu_cap(X86_FEATURE_SYSCALL32);
+	}
 }
 
 static void __init xen_pvmmu_arch_setup(void)

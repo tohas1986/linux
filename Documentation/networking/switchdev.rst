@@ -1,6 +1,5 @@
 .. SPDX-License-Identifier: GPL-2.0
 .. include:: <isonum.txt>
-.. _switchdev:
 
 ===============================================
 Ethernet switch device driver model (switchdev)

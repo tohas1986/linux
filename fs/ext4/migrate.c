@@ -56,7 +56,8 @@ static int finish_range(handle_t *handle, struct inode *inode,
 	retval = ext4_ext_insert_extent(handle, inode, &path, &newext, 0);
 err_out:
 	up_write((&EXT4_I(inode)->i_data_sem));
-	ext4_free_ext_path(path);
+	ext4_ext_drop_refs(path);
+	kfree(path);
 	lb->first_pblock = 0;
 	return retval;
 }

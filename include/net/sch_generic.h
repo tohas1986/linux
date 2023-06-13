@@ -326,6 +326,11 @@ struct tcf_result {
 		};
 		const struct tcf_proto *goto_tp;
 
+		/* used in the skb_tc_reinsert function */
+		struct {
+			bool		ingress;
+			struct gnet_stats_queue *qstats;
+		};
 	};
 };
 
@@ -677,9 +682,6 @@ qdisc_offload_graft_helper(struct net_device *dev, struct Qdisc *sch,
 {
 }
 #endif
-void qdisc_offload_query_caps(struct net_device *dev,
-			      enum tc_setup_type type,
-			      void *caps, size_t caps_len);
 struct Qdisc *qdisc_alloc(struct netdev_queue *dev_queue,
 			  const struct Qdisc_ops *ops,
 			  struct netlink_ext_ack *extack);
@@ -936,6 +938,13 @@ static inline void qdisc_purge_queue(struct Qdisc *sch)
 	qdisc_qstats_qlen_backlog(sch, &qlen, &backlog);
 	qdisc_reset(sch);
 	qdisc_tree_reduce_backlog(sch, qlen, backlog);
+}
+
+static inline void qdisc_skb_head_init(struct qdisc_skb_head *qh)
+{
+	qh->head = NULL;
+	qh->tail = NULL;
+	qh->qlen = 0;
 }
 
 static inline void __qdisc_enqueue_tail(struct sk_buff *skb,
@@ -1287,12 +1296,5 @@ void mini_qdisc_pair_block_init(struct mini_Qdisc_pair *miniqp,
 void mq_change_real_num_tx(struct Qdisc *sch, unsigned int new_real_tx);
 
 int sch_frag_xmit_hook(struct sk_buff *skb, int (*xmit)(struct sk_buff *skb));
-
-/* Make sure qdisc is no longer in SCHED state. */
-static inline void qdisc_synchronize(const struct Qdisc *q)
-{
-	while (test_bit(__QDISC_STATE_SCHED, &q->state))
-		msleep(1);
-}
 
 #endif

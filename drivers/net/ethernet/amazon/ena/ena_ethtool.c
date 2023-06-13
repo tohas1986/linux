@@ -462,8 +462,8 @@ static void ena_get_drvinfo(struct net_device *dev,
 {
 	struct ena_adapter *adapter = netdev_priv(dev);
 
-	strscpy(info->driver, DRV_MODULE_NAME, sizeof(info->driver));
-	strscpy(info->bus_info, pci_name(adapter->pdev),
+	strlcpy(info->driver, DRV_MODULE_NAME, sizeof(info->driver));
+	strlcpy(info->bus_info, pci_name(adapter->pdev),
 		sizeof(info->bus_info));
 }
 
@@ -887,7 +887,11 @@ static int ena_set_tunable(struct net_device *netdev,
 	switch (tuna->id) {
 	case ETHTOOL_RX_COPYBREAK:
 		len = *(u32 *)data;
-		ret = ena_set_rx_copybreak(adapter, len);
+		if (len > adapter->netdev->mtu) {
+			ret = -EINVAL;
+			break;
+		}
+		adapter->rx_copybreak = len;
 		break;
 	default:
 		ret = -EINVAL;

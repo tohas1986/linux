@@ -1193,10 +1193,13 @@ static int boe_panel_enter_sleep_mode(struct boe_panel *boe)
 	return 0;
 }
 
-static int boe_panel_disable(struct drm_panel *panel)
+static int boe_panel_unprepare(struct drm_panel *panel)
 {
 	struct boe_panel *boe = to_boe_panel(panel);
 	int ret;
+
+	if (!boe->prepared)
+		return 0;
 
 	ret = boe_panel_enter_sleep_mode(boe);
 	if (ret < 0) {
@@ -1205,16 +1208,6 @@ static int boe_panel_disable(struct drm_panel *panel)
 	}
 
 	msleep(150);
-
-	return 0;
-}
-
-static int boe_panel_unprepare(struct drm_panel *panel)
-{
-	struct boe_panel *boe = to_boe_panel(panel);
-
-	if (!boe->prepared)
-		return 0;
 
 	if (boe->desc->discharge_on_disable) {
 		regulator_disable(boe->avee);
@@ -1535,7 +1528,6 @@ static enum drm_panel_orientation boe_panel_get_orientation(struct drm_panel *pa
 }
 
 static const struct drm_panel_funcs boe_panel_funcs = {
-	.disable = boe_panel_disable,
 	.unprepare = boe_panel_unprepare,
 	.prepare = boe_panel_prepare,
 	.enable = boe_panel_enable,
@@ -1630,7 +1622,7 @@ static void boe_panel_shutdown(struct mipi_dsi_device *dsi)
 	drm_panel_unprepare(&boe->base);
 }
 
-static void boe_panel_remove(struct mipi_dsi_device *dsi)
+static int boe_panel_remove(struct mipi_dsi_device *dsi)
 {
 	struct boe_panel *boe = mipi_dsi_get_drvdata(dsi);
 	int ret;
@@ -1643,6 +1635,8 @@ static void boe_panel_remove(struct mipi_dsi_device *dsi)
 
 	if (boe->base.dev)
 		drm_panel_remove(&boe->base);
+
+	return 0;
 }
 
 static const struct of_device_id boe_of_match[] = {

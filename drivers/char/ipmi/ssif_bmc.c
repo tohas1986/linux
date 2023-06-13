@@ -251,7 +251,7 @@ static __poll_t ssif_bmc_poll(struct file *file, poll_table *wait)
 	spin_lock_irq(&ssif_bmc->lock);
 	/* The request is available, userspace application can get the request */
 	if (ssif_bmc->request_available)
-		mask |= EPOLLIN;
+		mask |= POLLIN;
 
 	spin_unlock_irq(&ssif_bmc->lock);
 
@@ -797,7 +797,7 @@ static int ssif_bmc_cb(struct i2c_client *client, enum i2c_slave_event event, u8
 	return ret;
 }
 
-static int ssif_bmc_probe(struct i2c_client *client)
+static int ssif_bmc_probe(struct i2c_client *client, const struct i2c_device_id *id)
 {
 	struct ssif_bmc_ctx *ssif_bmc;
 	int ret;
@@ -835,12 +835,14 @@ static int ssif_bmc_probe(struct i2c_client *client)
 	return ret;
 }
 
-static void ssif_bmc_remove(struct i2c_client *client)
+static int ssif_bmc_remove(struct i2c_client *client)
 {
 	struct ssif_bmc_ctx *ssif_bmc = i2c_get_clientdata(client);
 
 	i2c_slave_unregister(client);
 	misc_deregister(&ssif_bmc->miscdev);
+
+	return 0;
 }
 
 static const struct of_device_id ssif_bmc_match[] = {
@@ -860,7 +862,7 @@ static struct i2c_driver ssif_bmc_driver = {
 		.name           = DEVICE_NAME,
 		.of_match_table = ssif_bmc_match,
 	},
-	.probe_new      = ssif_bmc_probe,
+	.probe          = ssif_bmc_probe,
 	.remove         = ssif_bmc_remove,
 	.id_table       = ssif_bmc_id,
 };

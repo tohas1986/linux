@@ -108,12 +108,7 @@ EXPORT_SYMBOL(mdiobus_unregister_device);
 
 struct phy_device *mdiobus_get_phy(struct mii_bus *bus, int addr)
 {
-	struct mdio_device *mdiodev;
-
-	if (addr < 0 || addr >= ARRAY_SIZE(bus->mdio_map))
-		return NULL;
-
-	mdiodev = bus->mdio_map[addr];
+	struct mdio_device *mdiodev = bus->mdio_map[addr];
 
 	if (!mdiodev)
 		return NULL;
@@ -237,7 +232,7 @@ static ssize_t mdio_bus_stat_field_show(struct device *dev,
 		val = mdio_bus_get_stat(&bus->stats[sattr->addr],
 					sattr->field_offset);
 
-	return sysfs_emit(buf, "%llu\n", val);
+	return sprintf(buf, "%llu\n", val);
 }
 
 static ssize_t mdio_bus_device_stat_field_show(struct device *dev,
@@ -256,7 +251,7 @@ static ssize_t mdio_bus_device_stat_field_show(struct device *dev,
 
 	val = mdio_bus_get_stat(&bus->stats[addr], sattr->field_offset);
 
-	return sysfs_emit(buf, "%llu\n", val);
+	return sprintf(buf, "%llu\n", val);
 }
 
 #define MDIO_BUS_STATS_ATTR_DECL(field, file)				\

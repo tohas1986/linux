@@ -123,6 +123,7 @@ static int brcmf_c_process_clm_blob(struct brcmf_if *ifp)
 	struct brcmf_bus *bus = drvr->bus_if;
 	struct brcmf_dload_data_le *chunk_buf;
 	const struct firmware *clm = NULL;
+	u8 clm_name[BRCMF_FW_NAME_LEN];
 	u32 chunk_len;
 	u32 datalen;
 	u32 cumulative_len;
@@ -132,8 +133,15 @@ static int brcmf_c_process_clm_blob(struct brcmf_if *ifp)
 
 	brcmf_dbg(TRACE, "Enter\n");
 
-	err = brcmf_bus_get_blob(bus, &clm, BRCMF_BLOB_CLM);
-	if (err || !clm) {
+	memset(clm_name, 0, sizeof(clm_name));
+	err = brcmf_bus_get_fwname(bus, ".clm_blob", clm_name);
+	if (err) {
+		bphy_err(drvr, "get CLM blob file name failed (%d)\n", err);
+		return err;
+	}
+
+	err = firmware_request_nowarn(&clm, clm_name, bus->dev);
+	if (err) {
 		brcmf_info("no clm_blob available (err=%d), device may have limited channels available\n",
 			   err);
 		return 0;
@@ -253,7 +261,7 @@ int brcmf_c_preinit_dcmds(struct brcmf_if *ifp)
 				     &revinfo, sizeof(revinfo));
 	if (err < 0) {
 		bphy_err(drvr, "retrieving revision info failed, %d\n", err);
-		strscpy(ri->chipname, "UNKNOWN", sizeof(ri->chipname));
+		strlcpy(ri->chipname, "UNKNOWN", sizeof(ri->chipname));
 	} else {
 		ri->vendorid = le32_to_cpu(revinfo.vendorid);
 		ri->deviceid = le32_to_cpu(revinfo.deviceid);
@@ -305,12 +313,8 @@ int brcmf_c_preinit_dcmds(struct brcmf_if *ifp)
 	brcmf_info("Firmware: %s %s\n", ri->chipname, buf);
 
 	/* locate firmware version number for ethtool */
-	ptr = strrchr(buf, ' ');
-	if (!ptr) {
-		bphy_err(drvr, "Retrieving version number failed");
-		goto done;
-	}
-	strscpy(ifp->drvr->fwver, ptr + 1, sizeof(ifp->drvr->fwver));
+	ptr = strrchr(buf, ' ') + 1;
+	strlcpy(ifp->drvr->fwver, ptr, sizeof(ifp->drvr->fwver));
 
 	/* Query for 'clmver' to get CLM version info from firmware */
 	memset(buf, 0, sizeof(buf));
@@ -420,11 +424,11 @@ static void brcmf_mp_attach(void)
 	 * if not set then if available use the platform data version. To make
 	 * sure it gets initialized at all, always copy the module param version
 	 */
-	strscpy(brcmf_mp_global.firmware_path, brcmf_firmware_path,
+	strlcpy(brcmf_mp_global.firmware_path, brcmf_firmware_path,
 		BRCMF_FW_ALTPATH_LEN);
 	if ((brcmfmac_pdata) && (brcmfmac_pdata->fw_alternative_path) &&
 	    (brcmf_mp_global.firmware_path[0] == '\0')) {
-		strscpy(brcmf_mp_global.firmware_path,
+		strlcpy(brcmf_mp_global.firmware_path,
 			brcmfmac_pdata->fw_alternative_path,
 			BRCMF_FW_ALTPATH_LEN);
 	}

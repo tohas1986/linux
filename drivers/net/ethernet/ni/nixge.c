@@ -249,26 +249,25 @@ static void nixge_hw_dma_bd_release(struct net_device *ndev)
 	struct sk_buff *skb;
 	int i;
 
-	if (priv->rx_bd_v) {
-		for (i = 0; i < RX_BD_NUM; i++) {
-			phys_addr = nixge_hw_dma_bd_get_addr(&priv->rx_bd_v[i],
-							     phys);
+	for (i = 0; i < RX_BD_NUM; i++) {
+		phys_addr = nixge_hw_dma_bd_get_addr(&priv->rx_bd_v[i],
+						     phys);
 
-			dma_unmap_single(ndev->dev.parent, phys_addr,
-					 NIXGE_MAX_JUMBO_FRAME_SIZE,
-					 DMA_FROM_DEVICE);
+		dma_unmap_single(ndev->dev.parent, phys_addr,
+				 NIXGE_MAX_JUMBO_FRAME_SIZE,
+				 DMA_FROM_DEVICE);
 
-			skb = (struct sk_buff *)(uintptr_t)
-				nixge_hw_dma_bd_get_addr(&priv->rx_bd_v[i],
-							 sw_id_offset);
-			dev_kfree_skb(skb);
-		}
+		skb = (struct sk_buff *)(uintptr_t)
+			nixge_hw_dma_bd_get_addr(&priv->rx_bd_v[i],
+						 sw_id_offset);
+		dev_kfree_skb(skb);
+	}
 
+	if (priv->rx_bd_v)
 		dma_free_coherent(ndev->dev.parent,
 				  sizeof(*priv->rx_bd_v) * RX_BD_NUM,
 				  priv->rx_bd_v,
 				  priv->rx_bd_p);
-	}
 
 	if (priv->tx_skb)
 		devm_kfree(ndev->dev.parent, priv->tx_skb);
@@ -992,8 +991,8 @@ static const struct net_device_ops nixge_netdev_ops = {
 static void nixge_ethtools_get_drvinfo(struct net_device *ndev,
 				       struct ethtool_drvinfo *ed)
 {
-	strscpy(ed->driver, "nixge", sizeof(ed->driver));
-	strscpy(ed->bus_info, "platform", sizeof(ed->bus_info));
+	strlcpy(ed->driver, "nixge", sizeof(ed->driver));
+	strlcpy(ed->bus_info, "platform", sizeof(ed->bus_info));
 }
 
 static int
@@ -1296,7 +1295,7 @@ static int nixge_probe(struct platform_device *pdev)
 	priv->ndev = ndev;
 	priv->dev = &pdev->dev;
 
-	netif_napi_add(ndev, &priv->napi, nixge_poll);
+	netif_napi_add(ndev, &priv->napi, nixge_poll, NAPI_POLL_WEIGHT);
 	err = nixge_of_get_resources(pdev);
 	if (err)
 		goto free_netdev;

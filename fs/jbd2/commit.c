@@ -122,8 +122,8 @@ static int journal_submit_commit_record(journal_t *journal,
 {
 	struct commit_header *tmp;
 	struct buffer_head *bh;
+	int ret;
 	struct timespec64 now;
-	blk_opf_t write_flags = REQ_OP_WRITE | REQ_SYNC;
 
 	*cbh = NULL;
 
@@ -155,11 +155,13 @@ static int journal_submit_commit_record(journal_t *journal,
 
 	if (journal->j_flags & JBD2_BARRIER &&
 	    !jbd2_has_feature_async_commit(journal))
-		write_flags |= REQ_PREFLUSH | REQ_FUA;
+		ret = submit_bh(REQ_OP_WRITE | REQ_SYNC | REQ_PREFLUSH |
+				REQ_FUA, bh);
+	else
+		ret = submit_bh(REQ_OP_WRITE | REQ_SYNC, bh);
 
-	submit_bh(write_flags, bh);
 	*cbh = bh;
-	return 0;
+	return ret;
 }
 
 /*

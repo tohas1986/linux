@@ -251,9 +251,7 @@ int qcom_icc_rpmh_remove(struct platform_device *pdev)
 	struct qcom_icc_provider *qp = platform_get_drvdata(pdev);
 
 	icc_nodes_remove(&qp->provider);
-	icc_provider_del(&qp->provider);
-
-	return 0;
+	return icc_provider_del(&qp->provider);
 }
 EXPORT_SYMBOL_GPL(qcom_icc_rpmh_remove);
 

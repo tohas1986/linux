@@ -26,6 +26,7 @@
 #include <drm/drm_debugfs.h>
 #include <drm/drm_fourcc.h>
 #include <drm/drm_framebuffer.h>
+#include <drm/drm_plane_helper.h>
 #include <drm/drm_vblank.h>
 
 #include "dc.h"
@@ -3205,10 +3206,8 @@ static int tegra_dc_probe(struct platform_device *pdev)
 	usleep_range(2000, 4000);
 
 	err = reset_control_assert(dc->rst);
-	if (err < 0) {
-		clk_disable_unprepare(dc->clk);
+	if (err < 0)
 		return err;
-	}
 
 	usleep_range(2000, 4000);
 

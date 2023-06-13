@@ -33,4 +33,3 @@ Linux Tracing Technologies
    coresight/index
    user_events
    rv/index
-   hisi-ptt

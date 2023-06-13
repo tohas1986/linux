@@ -203,6 +203,18 @@ void ftrace_likely_update(struct ftrace_likely_data *f, int val,
 	__v;								\
 })
 
+/*
+ * With CONFIG_CFI_CLANG, the compiler replaces function addresses in
+ * instrumented C code with jump table addresses. Architectures that
+ * support CFI can define this macro to return the actual function address
+ * when needed.
+ */
+#ifndef function_nocfi
+#define function_nocfi(x) (x)
+#endif
+
+#include <asm/rwonce.h>
+
 #endif /* __KERNEL__ */
 
 /*
@@ -211,11 +223,9 @@ void ftrace_likely_update(struct ftrace_likely_data *f, int val,
  * otherwise, or eliminated entirely due to lack of references that are
  * visible to the compiler.
  */
-#define ___ADDRESSABLE(sym, __attrs) \
-	static void * __used __attrs \
-		__UNIQUE_ID(__PASTE(__addressable_,sym)) = (void *)&sym;
 #define __ADDRESSABLE(sym) \
-	___ADDRESSABLE(sym, __section(".discard.addressable"))
+	static void * __section(".discard.addressable") __used \
+		__UNIQUE_ID(__PASTE(__addressable_,sym)) = (void *)&sym;
 
 /**
  * offset_to_ptr - convert a relative memory offset to an absolute pointer
@@ -242,7 +252,5 @@ static inline void *offset_to_ptr(const int *off)
  * arch/x86/kernel/smpboot.c::start_secondary() for an example.
  */
 #define prevent_tail_call_optimization()	mb()
-
-#include <asm/rwonce.h>
 
 #endif /* __LINUX_COMPILER_H */

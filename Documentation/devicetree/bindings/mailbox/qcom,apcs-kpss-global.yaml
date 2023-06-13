@@ -45,17 +45,23 @@ properties:
   clocks:
     description: phandles to the parent clocks of the clock driver
     minItems: 2
-    maxItems: 3
+    items:
+      - description: primary pll parent of the clock driver
+      - description: auxiliary parent
+      - description: reference clock
 
   '#mbox-cells':
     const: 1
 
   '#clock-cells':
-    enum: [0, 1]
+    const: 0
 
   clock-names:
     minItems: 2
-    maxItems: 3
+    items:
+      - const: pll
+      - const: aux
+      - const: ref
 
 required:
   - compatible
@@ -69,6 +75,8 @@ allOf:
       properties:
         compatible:
           enum:
+            - qcom,ipq6018-apcs-apps-global
+            - qcom,ipq8074-apcs-apps-global
             - qcom,msm8916-apcs-kpss-global
             - qcom,msm8994-apcs-kpss-global
             - qcom,msm8996-apcs-hmss-global
@@ -82,13 +90,7 @@ allOf:
     then:
       properties:
         clocks:
-          items:
-            - description: primary pll parent of the clock driver
-            - description: auxiliary parent
-        clock-names:
-          items:
-            - const: pll
-            - const: aux
+          maxItems: 2
   - if:
       properties:
         compatible:
@@ -97,46 +99,7 @@ allOf:
     then:
       properties:
         clocks:
-          items:
-            - description: primary pll parent of the clock driver
-            - description: auxiliary parent
-            - description: reference clock
-        clock-names:
-          items:
-            - const: pll
-            - const: aux
-            - const: ref
-  - if:
-      properties:
-        compatible:
-          enum:
-            - qcom,ipq6018-apcs-apps-global
-            - qcom,ipq8074-apcs-apps-global
-    then:
-      properties:
-        clocks:
-          items:
-            - description: primary pll parent of the clock driver
-            - description: XO clock
-        clock-names:
-          items:
-            - const: pll
-            - const: xo
-  - if:
-      properties:
-        compatible:
-          enum:
-            - qcom,ipq6018-apcs-apps-global
-            - qcom,ipq8074-apcs-apps-global
-    then:
-      properties:
-        '#clock-cells':
-          const: 1
-    else:
-      properties:
-        '#clock-cells':
-          const: 0
-
+          maxItems: 3
 examples:
 
   # Example apcs with msm8996

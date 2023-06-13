@@ -320,9 +320,6 @@ int ioremap_page_range(unsigned long addr, unsigned long end,
 	err = vmap_range_noflush(addr, end, phys_addr, pgprot_nx(prot),
 				 ioremap_max_page_shift);
 	flush_cache_vmap(addr, end);
-	if (!err)
-		kmsan_ioremap_page_range(addr, end, phys_addr, prot,
-					 ioremap_max_page_shift);
 	return err;
 }
 
@@ -419,7 +416,7 @@ static void vunmap_p4d_range(pgd_t *pgd, unsigned long addr, unsigned long end,
  *
  * This is an internal function only. Do not use outside mm/.
  */
-void __vunmap_range_noflush(unsigned long start, unsigned long end)
+void vunmap_range_noflush(unsigned long start, unsigned long end)
 {
 	unsigned long next;
 	pgd_t *pgd;
@@ -439,12 +436,6 @@ void __vunmap_range_noflush(unsigned long start, unsigned long end)
 
 	if (mask & ARCH_PAGE_TABLE_SYNC_MASK)
 		arch_sync_kernel_mappings(start, end);
-}
-
-void vunmap_range_noflush(unsigned long start, unsigned long end)
-{
-	kmsan_vunmap_range_noflush(start, end);
-	__vunmap_range_noflush(start, end);
 }
 
 /**
@@ -584,7 +575,7 @@ static int vmap_small_pages_range_noflush(unsigned long addr, unsigned long end,
  *
  * This is an internal function only. Do not use outside mm/.
  */
-int __vmap_pages_range_noflush(unsigned long addr, unsigned long end,
+int vmap_pages_range_noflush(unsigned long addr, unsigned long end,
 		pgprot_t prot, struct page **pages, unsigned int page_shift)
 {
 	unsigned int i, nr = (end - addr) >> PAGE_SHIFT;
@@ -599,7 +590,7 @@ int __vmap_pages_range_noflush(unsigned long addr, unsigned long end,
 		int err;
 
 		err = vmap_range_noflush(addr, addr + (1UL << page_shift),
-					page_to_phys(pages[i]), prot,
+					__pa(page_address(pages[i])), prot,
 					page_shift);
 		if (err)
 			return err;
@@ -608,13 +599,6 @@ int __vmap_pages_range_noflush(unsigned long addr, unsigned long end,
 	}
 
 	return 0;
-}
-
-int vmap_pages_range_noflush(unsigned long addr, unsigned long end,
-		pgprot_t prot, struct page **pages, unsigned int page_shift)
-{
-	kmsan_vmap_pages_range_noflush(addr, end, prot, pages, page_shift);
-	return __vmap_pages_range_noflush(addr, end, prot, pages, page_shift);
 }
 
 /**
@@ -1316,12 +1300,12 @@ find_vmap_lowest_match(struct rb_root *root, unsigned long size,
 #include <linux/random.h>
 
 static struct vmap_area *
-find_vmap_lowest_linear_match(struct list_head *head, unsigned long size,
+find_vmap_lowest_linear_match(unsigned long size,
 	unsigned long align, unsigned long vstart)
 {
 	struct vmap_area *va;
 
-	list_for_each_entry(va, head, list) {
+	list_for_each_entry(va, &free_vmap_area_list, list) {
 		if (!is_within_this_va(va, size, align, vstart))
 			continue;
 
@@ -1332,8 +1316,7 @@ find_vmap_lowest_linear_match(struct list_head *head, unsigned long size,
 }
 
 static void
-find_vmap_lowest_match_check(struct rb_root *root, struct list_head *head,
-			     unsigned long size, unsigned long align)
+find_vmap_lowest_match_check(unsigned long size, unsigned long align)
 {
 	struct vmap_area *va_1, *va_2;
 	unsigned long vstart;
@@ -1342,8 +1325,8 @@ find_vmap_lowest_match_check(struct rb_root *root, struct list_head *head,
 	get_random_bytes(&rnd, sizeof(rnd));
 	vstart = VMALLOC_START + rnd;
 
-	va_1 = find_vmap_lowest_match(root, size, align, vstart, false);
-	va_2 = find_vmap_lowest_linear_match(head, size, align, vstart);
+	va_1 = find_vmap_lowest_match(size, align, vstart, false);
+	va_2 = find_vmap_lowest_linear_match(size, align, vstart);
 
 	if (va_1 != va_2)
 		pr_emerg("not lowest: t: 0x%p, l: 0x%p, v: 0x%lx\n",
@@ -1530,7 +1513,7 @@ __alloc_vmap_area(struct rb_root *root, struct list_head *head,
 		return vend;
 
 #if DEBUG_AUGMENT_LOWEST_MATCH_CHECK
-	find_vmap_lowest_match_check(root, head, size, align);
+	find_vmap_lowest_match_check(size, align);
 #endif
 
 	return nva_start_addr;

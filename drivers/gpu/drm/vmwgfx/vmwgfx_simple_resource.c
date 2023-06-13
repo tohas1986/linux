@@ -196,7 +196,7 @@ out_ret:
  * type.
  *
  * Returns: Refcounted pointer to the embedded struct vmw_resource if
- * successful. Error pointer otherwise.
+ * successfule. Error pointer otherwise.
  */
 struct vmw_resource *
 vmw_simple_resource_lookup(struct ttm_object_file *tfile,

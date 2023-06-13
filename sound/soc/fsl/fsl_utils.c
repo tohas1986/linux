@@ -124,7 +124,7 @@ void fsl_asoc_reparent_pll_clocks(struct device *dev, struct clk *clk,
 {
 	struct clk *p, *pll = NULL, *npll = NULL;
 	bool reparent = false;
-	int ret;
+	int ret = 0;
 
 	if (!clk || !pll8k_clk || !pll11k_clk)
 		return;

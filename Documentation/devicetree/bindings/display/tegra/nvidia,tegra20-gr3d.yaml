@@ -59,6 +59,7 @@ properties:
     maxItems: 2
 
   power-domain-names:
+    minItems: 2
     maxItems: 2
 
 allOf:

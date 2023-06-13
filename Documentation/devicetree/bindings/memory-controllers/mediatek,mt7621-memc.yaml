@@ -11,9 +11,7 @@ maintainers:
 
 properties:
   compatible:
-    items:
-      - const: mediatek,mt7621-memc
-      - const: syscon
+    const: mediatek,mt7621-memc
 
   reg:
     maxItems: 1
@@ -27,6 +25,6 @@ additionalProperties: false
 examples:
   - |
     memory-controller@5000 {
-        compatible = "mediatek,mt7621-memc", "syscon";
+        compatible = "mediatek,mt7621-memc";
         reg = <0x5000 0x1000>;
     };

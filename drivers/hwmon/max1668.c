@@ -386,7 +386,7 @@ static int max1668_detect(struct i2c_client *client,
 	if (!type_name)
 		return -ENODEV;
 
-	strscpy(info->type, type_name, I2C_NAME_SIZE);
+	strlcpy(info->type, type_name, I2C_NAME_SIZE);
 
 	return 0;
 }

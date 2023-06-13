@@ -1281,13 +1281,13 @@ static void shutdown_ssif(void *send_info)
 	}
 }
 
-static void ssif_remove(struct i2c_client *client)
+static int ssif_remove(struct i2c_client *client)
 {
 	struct ssif_info *ssif_info = i2c_get_clientdata(client);
 	struct ssif_addr_info *addr_info;
 
 	if (!ssif_info)
-		return;
+		return 0;
 
 	/*
 	 * After this point, we won't deliver anything asychronously
@@ -1303,6 +1303,8 @@ static void ssif_remove(struct i2c_client *client)
 	}
 
 	kfree(ssif_info);
+
+	return 0;
 }
 
 static int read_response(struct i2c_client *client, unsigned char *resp)
@@ -2098,7 +2100,7 @@ static struct platform_driver ipmi_driver = {
 	.id_table       = ssif_plat_ids
 };
 
-static int __init init_ipmi_ssif(void)
+static int init_ipmi_ssif(void)
 {
 	int i;
 	int rv;
@@ -2140,7 +2142,7 @@ static int __init init_ipmi_ssif(void)
 }
 module_init(init_ipmi_ssif);
 
-static void __exit cleanup_ipmi_ssif(void)
+static void cleanup_ipmi_ssif(void)
 {
 	if (!initialized)
 		return;

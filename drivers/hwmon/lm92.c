@@ -287,7 +287,7 @@ static int lm92_detect(struct i2c_client *new_client,
 	else
 		return -ENODEV;
 
-	strscpy(info->type, "lm92", I2C_NAME_SIZE);
+	strlcpy(info->type, "lm92", I2C_NAME_SIZE);
 
 	return 0;
 }

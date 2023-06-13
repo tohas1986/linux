@@ -632,23 +632,22 @@ bool filemap_range_has_writeback(struct address_space *mapping,
 {
 	XA_STATE(xas, &mapping->i_pages, start_byte >> PAGE_SHIFT);
 	pgoff_t max = end_byte >> PAGE_SHIFT;
-	struct folio *folio;
+	struct page *page;
 
 	if (end_byte < start_byte)
 		return false;
 
 	rcu_read_lock();
-	xas_for_each(&xas, folio, max) {
-		if (xas_retry(&xas, folio))
+	xas_for_each(&xas, page, max) {
+		if (xas_retry(&xas, page))
 			continue;
-		if (xa_is_value(folio))
+		if (xa_is_value(page))
 			continue;
-		if (folio_test_dirty(folio) || folio_test_locked(folio) ||
-				folio_test_writeback(folio))
+		if (PageDirty(page) || PageLocked(page) || PageWriteback(page))
 			break;
 	}
 	rcu_read_unlock();
-	return folio != NULL;
+	return page != NULL;
 }
 EXPORT_SYMBOL_GPL(filemap_range_has_writeback);
 
@@ -1222,12 +1221,15 @@ static inline int folio_wait_bit_common(struct folio *folio, int bit_nr,
 	struct wait_page_queue wait_page;
 	wait_queue_entry_t *wait = &wait_page.wait;
 	bool thrashing = false;
+	bool delayacct = false;
 	unsigned long pflags;
-	bool in_thrashing;
 
 	if (bit_nr == PG_locked &&
 	    !folio_test_uptodate(folio) && folio_test_workingset(folio)) {
-		delayacct_thrashing_start(&in_thrashing);
+		if (!folio_test_swapbacked(folio)) {
+			delayacct_thrashing_start();
+			delayacct = true;
+		}
 		psi_memstall_enter(&pflags);
 		thrashing = true;
 	}
@@ -1327,7 +1329,8 @@ repeat:
 	finish_wait(q, wait);
 
 	if (thrashing) {
-		delayacct_thrashing_end(&in_thrashing);
+		if (delayacct)
+			delayacct_thrashing_end();
 		psi_memstall_leave(&pflags);
 	}
 
@@ -1375,14 +1378,17 @@ void migration_entry_wait_on_locked(swp_entry_t entry, pte_t *ptep,
 	struct wait_page_queue wait_page;
 	wait_queue_entry_t *wait = &wait_page.wait;
 	bool thrashing = false;
+	bool delayacct = false;
 	unsigned long pflags;
-	bool in_thrashing;
 	wait_queue_head_t *q;
 	struct folio *folio = page_folio(pfn_swap_entry_to_page(entry));
 
 	q = folio_waitqueue(folio);
 	if (!folio_test_uptodate(folio) && folio_test_workingset(folio)) {
-		delayacct_thrashing_start(&in_thrashing);
+		if (!folio_test_swapbacked(folio)) {
+			delayacct_thrashing_start();
+			delayacct = true;
+		}
 		psi_memstall_enter(&pflags);
 		thrashing = true;
 	}
@@ -1429,7 +1435,8 @@ void migration_entry_wait_on_locked(swp_entry_t entry, pte_t *ptep,
 	finish_wait(q, wait);
 
 	if (thrashing) {
-		delayacct_thrashing_end(&in_thrashing);
+		if (delayacct)
+			delayacct_thrashing_end();
 		psi_memstall_leave(&pflags);
 	}
 }
@@ -1460,7 +1467,7 @@ EXPORT_SYMBOL(folio_wait_bit_killable);
  *
  * Return: 0 if the folio was unlocked or -EINTR if interrupted by a signal.
  */
-static int folio_put_wait_locked(struct folio *folio, int state)
+int folio_put_wait_locked(struct folio *folio, int state)
 {
 	return folio_wait_bit_common(folio, PG_locked, state, DROP);
 }
@@ -1626,26 +1633,24 @@ EXPORT_SYMBOL(folio_end_writeback);
  */
 void page_endio(struct page *page, bool is_write, int err)
 {
-	struct folio *folio = page_folio(page);
-
 	if (!is_write) {
 		if (!err) {
-			folio_mark_uptodate(folio);
+			SetPageUptodate(page);
 		} else {
-			folio_clear_uptodate(folio);
-			folio_set_error(folio);
+			ClearPageUptodate(page);
+			SetPageError(page);
 		}
-		folio_unlock(folio);
+		unlock_page(page);
 	} else {
 		if (err) {
 			struct address_space *mapping;
 
-			folio_set_error(folio);
-			mapping = folio_mapping(folio);
+			SetPageError(page);
+			mapping = page_mapping(page);
 			if (mapping)
 				mapping_set_error(mapping, err);
 		}
-		folio_end_writeback(folio);
+		end_page_writeback(page);
 	}
 }
 EXPORT_SYMBOL_GPL(page_endio);
@@ -2190,31 +2195,30 @@ bool folio_more_pages(struct folio *folio, pgoff_t index, pgoff_t max)
 }
 
 /**
- * filemap_get_folios_contig - Get a batch of contiguous folios
+ * find_get_pages_contig - gang contiguous pagecache lookup
  * @mapping:	The address_space to search
- * @start:	The starting page index
- * @end:	The final page index (inclusive)
- * @fbatch:	The batch to fill
+ * @index:	The starting page index
+ * @nr_pages:	The maximum number of pages
+ * @pages:	Where the resulting pages are placed
  *
- * filemap_get_folios_contig() works exactly like filemap_get_folios(),
- * except the returned folios are guaranteed to be contiguous. This may
- * not return all contiguous folios if the batch gets filled up.
+ * find_get_pages_contig() works exactly like find_get_pages_range(),
+ * except that the returned number of pages are guaranteed to be
+ * contiguous.
  *
- * Return: The number of folios found.
- * Also update @start to be positioned for traversal of the next folio.
+ * Return: the number of pages which were found.
  */
-
-unsigned filemap_get_folios_contig(struct address_space *mapping,
-		pgoff_t *start, pgoff_t end, struct folio_batch *fbatch)
+unsigned find_get_pages_contig(struct address_space *mapping, pgoff_t index,
+			       unsigned int nr_pages, struct page **pages)
 {
-	XA_STATE(xas, &mapping->i_pages, *start);
-	unsigned long nr;
+	XA_STATE(xas, &mapping->i_pages, index);
 	struct folio *folio;
+	unsigned int ret = 0;
+
+	if (unlikely(!nr_pages))
+		return 0;
 
 	rcu_read_lock();
-
-	for (folio = xas_load(&xas); folio && xas.xa_index <= end;
-			folio = xas_next(&xas)) {
+	for (folio = xas_load(&xas); folio; folio = xas_next(&xas)) {
 		if (xas_retry(&xas, folio))
 			continue;
 		/*
@@ -2222,45 +2226,33 @@ unsigned filemap_get_folios_contig(struct address_space *mapping,
 		 * No current caller is looking for DAX entries.
 		 */
 		if (xa_is_value(folio))
-			goto update_start;
+			break;
 
 		if (!folio_try_get_rcu(folio))
 			goto retry;
 
 		if (unlikely(folio != xas_reload(&xas)))
-			goto put_folio;
+			goto put_page;
 
-		if (!folio_batch_add(fbatch, folio)) {
-			nr = folio_nr_pages(folio);
-
-			if (folio_test_hugetlb(folio))
-				nr = 1;
-			*start = folio->index + nr;
-			goto out;
+again:
+		pages[ret] = folio_file_page(folio, xas.xa_index);
+		if (++ret == nr_pages)
+			break;
+		if (folio_more_pages(folio, xas.xa_index, ULONG_MAX)) {
+			xas.xa_index++;
+			folio_ref_inc(folio);
+			goto again;
 		}
 		continue;
-put_folio:
+put_page:
 		folio_put(folio);
-
 retry:
 		xas_reset(&xas);
 	}
-
-update_start:
-	nr = folio_batch_count(fbatch);
-
-	if (nr) {
-		folio = fbatch->folios[nr - 1];
-		if (folio_test_hugetlb(folio))
-			*start = folio->index + 1;
-		else
-			*start = folio->index + folio_nr_pages(folio);
-	}
-out:
 	rcu_read_unlock();
-	return folio_batch_count(fbatch);
+	return ret;
 }
-EXPORT_SYMBOL(filemap_get_folios_contig);
+EXPORT_SYMBOL(find_get_pages_contig);
 
 /**
  * find_get_pages_range_tag - Find and return head pages matching @tag.
@@ -2390,8 +2382,6 @@ retry:
 static int filemap_read_folio(struct file *file, filler_t filler,
 		struct folio *folio)
 {
-	bool workingset = folio_test_workingset(folio);
-	unsigned long pflags;
 	int error;
 
 	/*
@@ -2400,13 +2390,8 @@ static int filemap_read_folio(struct file *file, filler_t filler,
 	 * fails.
 	 */
 	folio_clear_error(folio);
-
 	/* Start the actual read. The read will unlock the page. */
-	if (unlikely(workingset))
-		psi_memstall_enter(&pflags);
 	error = filler(file, folio);
-	if (unlikely(workingset))
-		psi_memstall_leave(&pflags);
 	if (error)
 		return error;
 
@@ -2569,19 +2554,18 @@ static int filemap_get_pages(struct kiocb *iocb, struct iov_iter *iter,
 	struct folio *folio;
 	int err = 0;
 
-	/* "last_index" is the index of the page beyond the end of the read */
 	last_index = DIV_ROUND_UP(iocb->ki_pos + iter->count, PAGE_SIZE);
 retry:
 	if (fatal_signal_pending(current))
 		return -EINTR;
 
-	filemap_get_read_batch(mapping, index, last_index - 1, fbatch);
+	filemap_get_read_batch(mapping, index, last_index, fbatch);
 	if (!folio_batch_count(fbatch)) {
 		if (iocb->ki_flags & IOCB_NOIO)
 			return -EAGAIN;
 		page_cache_sync_readahead(mapping, ra, filp, index,
 				last_index - index);
-		filemap_get_read_batch(mapping, index, last_index - 1, fbatch);
+		filemap_get_read_batch(mapping, index, last_index, fbatch);
 	}
 	if (!folio_batch_count(fbatch)) {
 		if (iocb->ki_flags & (IOCB_NOWAIT | IOCB_WAITQ))

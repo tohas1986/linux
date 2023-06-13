@@ -5,7 +5,6 @@
 
 #include "aspeed-g5.dtsi"
 #include <dt-bindings/gpio/aspeed-gpio.h>
-#include <dt-bindings/interrupt-controller/irq.h>
 
 / {
 	model = "AMD EthanolX BMC";
@@ -59,22 +58,10 @@
 	flash@0 {
 		status = "okay";
 		m25p,fast-read;
-		label = "bmc";
 		#include "openbmc-flash-layout.dtsi"
 	};
 };
 
-&spi1 {
-	status = "okay";
-	pinctrl-names = "default";
-	pinctrl-0 = <&pinctrl_spi1_default>;
-	flash@0 {
-		status = "okay";
-		m25p,fast-read;
-		label = "bios";
-		spi-max-frequency = <100000000>;
-	};
-};
 
 &mac0 {
 	status = "okay";
@@ -91,9 +78,7 @@
 	status = "okay";
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl_txd1_default
-		     &pinctrl_rxd1_default
-		     &pinctrl_nrts1_default
-		     &pinctrl_ncts1_default>;
+		     &pinctrl_rxd1_default>;
 };
 
 &uart5 {
@@ -175,7 +160,7 @@
 &i2c3 {
 	status = "okay";
 	eeprom@50 {
-		compatible = "atmel,24c128";
+		compatible = "atmel,24c256";
 		reg = <0x50>;
 		pagesize = <64>;
 	};
@@ -274,12 +259,6 @@
 &lpc_ctrl {
 	//Enable lpc clock
 	status = "okay";
-};
-
-&vuart {
-	status = "okay";
-	aspeed,lpc-io-reg = <0x3f8>;
-	aspeed,lpc-interrupts = <4 IRQ_TYPE_LEVEL_HIGH>;
 };
 
 &pwm_tacho {

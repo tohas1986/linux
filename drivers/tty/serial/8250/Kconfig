@@ -116,7 +116,7 @@ config SERIAL_8250_CONSOLE
 
 	  If unsure, say N.
 
-config SERIAL_8250_PARISC
+config SERIAL_8250_GSC
 	tristate
 	depends on SERIAL_8250 && PARISC
 	default SERIAL_8250
@@ -248,6 +248,14 @@ config SERIAL_8250_ACCENT
 
 	  To compile this driver as a module, choose M here: the module
 	  will be called 8250_accent.
+
+config SERIAL_8250_ASPEED
+	tristate "Aspeed serial port support"
+	depends on SERIAL_8250 && ARCH_ASPEED
+	select ASPEED_UDMA
+	help
+	  If you have a system using an Aspeed ASTXXXX SoCs and wish to make use
+	  of its UARTs, say Y to this option. If unsure, say N.
 
 config SERIAL_8250_ASPEED_VUART
 	tristate "Aspeed Virtual UART"

@@ -24,6 +24,7 @@
 
 #define DRIVER_DESC "EHCI npcm7xx driver"
 
+static const char hcd_name[] = "npcm7xx-ehci";
 static struct hc_driver __read_mostly ehci_npcm7xx_hc_driver;
 
 static int __maybe_unused ehci_npcm7xx_drv_suspend(struct device *dev)
@@ -139,6 +140,8 @@ static int __init ehci_npcm7xx_init(void)
 {
 	if (usb_disabled())
 		return -ENODEV;
+
+	pr_info("%s: " DRIVER_DESC "\n", hcd_name);
 
 	ehci_init_driver(&ehci_npcm7xx_hc_driver, NULL);
 	return platform_driver_register(&npcm7xx_ehci_hcd_driver);

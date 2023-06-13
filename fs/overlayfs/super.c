@@ -15,7 +15,6 @@
 #include <linux/seq_file.h>
 #include <linux/posix_acl_xattr.h>
 #include <linux/exportfs.h>
-#include <linux/file.h>
 #include "overlayfs.h"
 
 MODULE_AUTHOR("Miklos Szeredi <miklos@szeredi.hu>");
@@ -139,16 +138,11 @@ static int ovl_dentry_revalidate_common(struct dentry *dentry,
 					unsigned int flags, bool weak)
 {
 	struct ovl_entry *oe = dentry->d_fsdata;
-	struct inode *inode = d_inode_rcu(dentry);
 	struct dentry *upper;
 	unsigned int i;
 	int ret = 1;
 
-	/* Careful in RCU mode */
-	if (!inode)
-		return -ECHILD;
-
-	upper = ovl_i_dentry_upper(inode);
+	upper = ovl_dentry_upper(dentry);
 	if (upper)
 		ret = ovl_revalidate_real(upper, flags, weak);
 
@@ -914,7 +908,7 @@ static int ovl_mount_dir(const char *name, struct path *path)
 	return err;
 }
 
-static int ovl_check_namelen(const struct path *path, struct ovl_fs *ofs,
+static int ovl_check_namelen(struct path *path, struct ovl_fs *ofs,
 			     const char *name)
 {
 	struct kstatfs statfs;
@@ -1028,20 +1022,7 @@ ovl_posix_acl_xattr_set(const struct xattr_handler *handler,
 
 	/* Check that everything is OK before copy-up */
 	if (value) {
-		/* The above comment can be understood in two ways:
-		 *
-		 * 1. We just want to check whether the basic POSIX ACL format
-		 *    is ok. For example, if the header is correct and the size
-		 *    is sane.
-		 * 2. We want to know whether the ACL_{GROUP,USER} entries can
-		 *    be mapped according to the underlying filesystem.
-		 *
-		 * Currently, we only check 1. If we wanted to check 2. we
-		 * would need to pass the mnt_userns and the fs_userns of the
-		 * underlying filesystem. But frankly, I think checking 1. is
-		 * enough to start the copy-up.
-		 */
-		acl = vfs_set_acl_prepare(&init_user_ns, &init_user_ns, value, size);
+		acl = posix_acl_from_xattr(&init_user_ns, value, size);
 		if (IS_ERR(acl))
 			return PTR_ERR(acl);
 	}
@@ -1372,11 +1353,10 @@ static int ovl_create_volatile_dirty(struct ovl_fs *ofs)
 }
 
 static int ovl_make_workdir(struct super_block *sb, struct ovl_fs *ofs,
-			    const struct path *workpath)
+			    struct path *workpath)
 {
 	struct vfsmount *mnt = ovl_upper_mnt(ofs);
-	struct dentry *workdir;
-	struct file *tmpfile;
+	struct dentry *temp, *workdir;
 	bool rename_whiteout;
 	bool d_type;
 	int fh_type;
@@ -1412,10 +1392,10 @@ static int ovl_make_workdir(struct super_block *sb, struct ovl_fs *ofs,
 		pr_warn("upper fs needs to support d_type.\n");
 
 	/* Check if upper/work fs supports O_TMPFILE */
-	tmpfile = ovl_do_tmpfile(ofs, ofs->workdir, S_IFREG | 0);
-	ofs->tmpfile = !IS_ERR(tmpfile);
+	temp = ovl_do_tmpfile(ofs, ofs->workdir, S_IFREG | 0);
+	ofs->tmpfile = !IS_ERR(temp);
 	if (ofs->tmpfile)
-		fput(tmpfile);
+		dput(temp);
 	else
 		pr_warn("upper fs does not support tmpfile.\n");
 
@@ -1502,7 +1482,7 @@ out:
 }
 
 static int ovl_get_workdir(struct super_block *sb, struct ovl_fs *ofs,
-			   const struct path *upperpath)
+			   struct path *upperpath)
 {
 	int err;
 	struct path workpath = { };
@@ -1545,7 +1525,7 @@ out:
 }
 
 static int ovl_get_indexdir(struct super_block *sb, struct ovl_fs *ofs,
-			    struct ovl_entry *oe, const struct path *upperpath)
+			    struct ovl_entry *oe, struct path *upperpath)
 {
 	struct vfsmount *mnt = ovl_upper_mnt(ofs);
 	struct dentry *indexdir;

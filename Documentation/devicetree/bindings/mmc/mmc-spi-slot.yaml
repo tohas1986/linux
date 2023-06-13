@@ -23,6 +23,8 @@ properties:
   reg:
     maxItems: 1
 
+  spi-max-frequency: true
+
   interrupts:
     maxItems: 1
 

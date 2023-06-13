@@ -1626,12 +1626,15 @@ static irqreturn_t phy_down_v3_hw(int phy_no, struct hisi_hba *hisi_hba)
 static irqreturn_t phy_bcast_v3_hw(int phy_no, struct hisi_hba *hisi_hba)
 {
 	struct hisi_sas_phy *phy = &hisi_hba->phy[phy_no];
+	struct asd_sas_phy *sas_phy = &phy->sas_phy;
 	u32 bcast_status;
 
 	hisi_sas_phy_write32(hisi_hba, phy_no, SL_RX_BCAST_CHK_MSK, 1);
 	bcast_status = hisi_sas_phy_read32(hisi_hba, phy_no, RX_PRIMS_STATUS);
-	if (bcast_status & RX_BCAST_CHG_MSK)
-		hisi_sas_phy_bcast(phy);
+	if ((bcast_status & RX_BCAST_CHG_MSK) &&
+	    !test_bit(HISI_SAS_RESETTING_BIT, &hisi_hba->flags))
+		sas_notify_port_event(sas_phy, PORTE_BROADCAST_RCVD,
+				      GFP_ATOMIC);
 	hisi_sas_phy_write32(hisi_hba, phy_no, CHL_INT0,
 			     CHL_INT0_SL_RX_BCST_ACK_MSK);
 	hisi_sas_phy_write32(hisi_hba, phy_no, SL_RX_BCAST_CHK_MSK, 0);
@@ -2783,6 +2786,7 @@ static int slave_configure_v3_hw(struct scsi_device *sdev)
 	struct hisi_hba *hisi_hba = shost_priv(shost);
 	int ret = hisi_sas_slave_configure(sdev);
 	struct device *dev = hisi_hba->dev;
+	unsigned int max_sectors;
 
 	if (ret)
 		return ret;
@@ -2797,6 +2801,12 @@ static int slave_configure_v3_hw(struct scsi_device *sdev)
 			pm_runtime_disable(dev);
 		}
 	}
+
+	/* Set according to IOMMU IOVA caching limit */
+	max_sectors = min_t(size_t, queue_max_hw_sectors(sdev->request_queue),
+			    (PAGE_SIZE * 32) >> SECTOR_SHIFT);
+
+	blk_queue_max_hw_sectors(sdev->request_queue, max_sectors);
 
 	return 0;
 }
@@ -3161,12 +3171,13 @@ static int debugfs_set_bist_v3_hw(struct hisi_hba *hisi_hba, bool enable)
 	return 0;
 }
 
-static void hisi_sas_map_queues(struct Scsi_Host *shost)
+static int hisi_sas_map_queues(struct Scsi_Host *shost)
 {
 	struct hisi_hba *hisi_hba = shost_priv(shost);
 	struct blk_mq_queue_map *qmap = &shost->tag_set.map[HCTX_TYPE_DEFAULT];
 
-	blk_mq_pci_map_queues(qmap, hisi_hba->pci_dev, BASE_VECTORS_V3_HW);
+	return blk_mq_pci_map_queues(qmap, hisi_hba->pci_dev,
+				     BASE_VECTORS_V3_HW);
 }
 
 static struct scsi_host_template sht_v3_hw = {

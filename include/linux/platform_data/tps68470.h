@@ -27,14 +27,9 @@ struct tps68470_regulator_platform_data {
 	const struct regulator_init_data *reg_init_data[TPS68470_NUM_REGULATORS];
 };
 
-struct tps68470_clk_consumer {
+struct tps68470_clk_platform_data {
 	const char *consumer_dev_name;
 	const char *consumer_con_id;
-};
-
-struct tps68470_clk_platform_data {
-	unsigned int n_consumers;
-	struct tps68470_clk_consumer consumers[];
 };
 
 #endif

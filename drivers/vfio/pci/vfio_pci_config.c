@@ -26,7 +26,7 @@
 #include <linux/vfio.h>
 #include <linux/slab.h>
 
-#include "vfio_pci_priv.h"
+#include <linux/vfio_pci_core.h>
 
 /* Fake capability ID for standard config space */
 #define PCI_CAP_ID_BASIC	0
@@ -1166,7 +1166,7 @@ static int vfio_msi_config_write(struct vfio_pci_core_device *vdev, int pos,
 		flags = le16_to_cpu(*pflags);
 
 		/* MSI is enabled via ioctl */
-		if  (vdev->irq_type != VFIO_PCI_MSI_IRQ_INDEX)
+		if  (!is_msi(vdev))
 			flags &= ~PCI_MSI_FLAGS_ENABLE;
 
 		/* Check queue size */

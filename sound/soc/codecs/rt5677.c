@@ -5693,9 +5693,11 @@ static int rt5677_i2c_probe(struct i2c_client *i2c)
 				      rt5677_dai, ARRAY_SIZE(rt5677_dai));
 }
 
-static void rt5677_i2c_remove(struct i2c_client *i2c)
+static int rt5677_i2c_remove(struct i2c_client *i2c)
 {
 	rt5677_free_gpio(i2c);
+
+	return 0;
 }
 
 static struct i2c_driver rt5677_i2c_driver = {

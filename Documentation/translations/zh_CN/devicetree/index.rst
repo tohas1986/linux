@@ -24,16 +24,21 @@ Open Firmware 和 Devicetree
 
    usage-model
    of_unittest
-   kernel-api
+
+Todolist:
+
+*   kernel-api
 
 Devicetree Overlays
 ===================
 .. toctree::
    :maxdepth: 1
 
-   changesets
-   dynamic-resolution-notes
-   overlay-notes
+Todolist:
+
+*   changesets
+*   dynamic-resolution-notes
+*   overlay-notes
 
 Devicetree Bindings
 ===================

@@ -1,0 +1,514 @@
+/dts-v1/;
+
+#include "aspeed-g5.dtsi"
+#include <dt-bindings/gpio/aspeed-gpio.h>
+#include <dt-bindings/i2c/i2c.h>
+
+/ {
+	model = "JBOG BMC";
+	compatible = "none,jbog-bmc", "aspeed,ast2500";
+
+	aliases {
+		serial4 = &uart5;
+		i2c14 = &i2c8_sw_ch6;   //PDB_FAN1
+		i2c15 = &i2c9_sw_ch6;   //PDB_FAN2
+		i2c16 = &i2c8_sw_ch0;
+		i2c17 = &i2c8_sw_ch2;
+
+		i2c18 = &i2c7_sw_ch0;
+		i2c19 = &i2c7_sw_ch1;
+		i2c20 = &i2c7_sw_ch2;
+		i2c21 = &i2c7_sw_ch3;
+		i2c22 = &i2c7_sw_ch4;
+		i2c23 = &i2c7_sw_ch5;
+		i2c24 = &i2c7_sw_ch6;
+		i2c25 = &i2c7_sw_ch7;
+
+		i2c26 = &i2c8_sw_ch1;
+		i2c27 = &i2c8_sw_ch4;
+		i2c28 = &i2c9_sw_ch1;
+		i2c29 = &i2c9_sw_ch4;
+
+		i2c30 = &i2c5_sw_ch0;
+	};
+
+	chosen {
+		stdout-path = &uart5;
+		bootargs = "console=ttyS4,115200n8 root=/dev/ram rw earlyrintk";
+	};
+
+	memory@80000000 {
+		reg = <0x80000000 0x20000000>;
+	};
+
+	reserved-memory {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		ramoops@9eff0000{
+			compatible = "ramoops";
+			reg = <0x9eff0000 0x10000>;
+			record-size = <0x2000>;
+			console-size = <0x2000>;
+		};
+	};
+
+	iio-hwmon {
+			compatible = "iio-hwmon";
+			io-channels = <&adc 0>, <&adc 1>, <&adc 2>, <&adc 3>,
+				<&adc 4>, <&adc 5>, <&adc 6>, <&adc 7>,
+				<&adc 8>, <&adc 9>, <&adc 10>, <&adc 11>,
+				<&adc 12>, <&adc 13>, <&adc 14>, <&adc 15>;
+	};
+
+	leds {
+		compatible = "gpio-leds";
+
+		heartbeat {
+			label = "heartbeat";
+			gpios = <&gpio ASPEED_GPIO(A, 3) GPIO_ACTIVE_LOW>;
+			linux,default-trigger = "timer";
+			active-delay = <100>;
+			inactive-delay = <100>;
+		};
+
+		identify {
+			default-state = "on";
+			gpios = <&gpio ASPEED_GPIO(Q, 7) GPIO_ACTIVE_LOW>;
+		};
+
+		status_amber {
+			default-state = "off";
+			gpios = <&gpio ASPEED_GPIO(I, 5) GPIO_ACTIVE_LOW>;
+		};
+
+		status_green {
+			default-state = "keep";
+			gpios = <&gpio ASPEED_GPIO(I, 4) GPIO_ACTIVE_LOW>;
+		};
+	};
+};
+
+&fmc {
+	status = "okay";
+	flash@0 {
+		status = "okay";
+		m25p,fast-read;
+		label = "spi1";
+		partitions {
+			compatible = "fixed-partitions";
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			u-boot@0 {
+				reg = <0x0 0x60000>; // 384KB
+				label = "u-boot";
+			};
+
+			u-boot-env@60000 {
+				reg = <0x60000 0x20000>; // 128KB
+				label = "u-boot-env";
+			};
+
+			kernel@80000 {
+				reg = <0x80000 0x440000>; // 4352KB
+				label = "kernel";
+			};
+
+			rofs@4c0000 {
+				reg = <0x4c0000 0x2000000>; // 32MB
+				label = "rofs";
+			};
+
+			rwfs@24c0000 {
+				reg = <0x24c0000 0x1400000>; // 20MB
+				label = "rwfs";
+			};
+
+			persistent@38C0000 {
+				reg = <0x38C0000 0x640000>; // 6.4MB must end at 0x3f00000
+				label = "persistent";
+			};
+		};
+	};
+	flash@1 {
+		status = "okay";
+		m25p,fast-read;
+		label = "spi2";
+	};
+};
+
+&espi {
+	status = "okay";
+};
+
+&jtag {
+	status = "okay";
+};
+
+&syscon {
+	/* uart-clock-high-speed; */
+	status = "okay";
+};
+
+&adc {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_adc0_default &pinctrl_adc1_default
+	 &pinctrl_adc2_default &pinctrl_adc3_default &pinctrl_adc4_default
+	 &pinctrl_adc5_default &pinctrl_adc6_default &pinctrl_adc7_default
+	 &pinctrl_adc8_default &pinctrl_adc9_default &pinctrl_adc10_default
+	 &pinctrl_adc11_default &pinctrl_adc12_default &pinctrl_adc13_default
+	 &pinctrl_adc15_default>;
+};
+
+&gpio {
+	status = "okay";
+	/* Enable GPIOD0 and GPIOD2 pass-through by default */
+	pinctrl-names = "pass-through";
+	pinctrl-0 = <&pinctrl_gpid0_default
+			&pinctrl_gpid2_default>;
+	gpio-line-names =
+	/*A0-A7*/	"A0", "A1", "A2", "A3", "A4", "A5", "A6", "A7",
+	/*B0-B7*/	"B0", "B1", "MB_RST_IN_N1", "B3", "B4", "B5", "B6", "B7",
+	/*C0-C7*/	"C0", "C1", "C2", "C3", "PS_ON_L", "HGX_BASE_PWR_EN", "C6", "C7",
+	/*D0-D7*/	"D0", "D1", "D2", "D3", "D4", "D5", "BMC_ID_BTN_N", "D7",
+	/*E0-E7*/	"E0", "E1", "E2","E3","SW_PERST_N0","SW_PERST_N1","SW_PERST_N2","SW_PERST_N3",
+	/*F0-F7*/	"HGX_PEX_RST_R_N0", "HGX_PEX_RST_R_N1", "HGX_PEX_RST_R_N2", "F3", "F4", "F5", "F6", "F7",
+	/*G0-G7*/	"G0", "G1", "G2", "G3", "G4", "G5", "G6", "G7",
+	/*H0-H7*/	"PWR_BTN_N", "MB_PWR_GD", "H2", "H3", "H4", "H5", "HGX_BASE_PWR_GD", "H7",
+	/*I0-I7*/	"I0", "I1", "I2", "I3", "I4", "I5", "I6", "I7",
+	/*J0-J7*/	"J0", "J1", "J2", "J3", "J4", "J5", "J6", "J7",
+	/*K0-K7*/	"K0", "K1", "K2", "K3", "K4", "K5", "K6", "K7",
+	/*L0-L7*/	"L0", "HGX_BASE_FPGA_R_READY", "L2", "L3", "L4", "L5", "L6", "L7",
+	/*M0-M7*/	"M0", "M1", "M2", "M3", "M4", "M5", "M6", "M7",
+	/*N0-N7*/	"N0", "N1", "N2", "N3", "N4", "N5", "N6", "N7",
+	/*O0-O7*/	"O0", "O1", "O2", "O3", "O4", "O5", "O6", "O7",
+	/*P0-P7*/	"P0", "P1", "P2", "P3", "P4", "P5", "P6", "P7",
+	/*Q0-Q7*/	"Q0", "Q1", "Q2", "Q3", "Q4", "Q5", "Q6", "Q7",
+	/*R0-R7*/	"R0", "R1", "R2", "R3", "R4", "R5", "R6", "R7",
+	/*S0-S7*/	"S0", "S1", "S2", "S3", "S4", "S5", "S6", "S7",
+	/*T0-T7*/	"T0", "T1", "T2", "T3", "T4", "T5", "T6", "T7",
+	/*U0-U7*/	"U0", "U1", "U2", "U3", "U4", "U5", "U6", "U7",
+	/*V0-V7*/	"V0", "V1", "V2", "V3", "V4", "V5", "V6", "V7",
+	/*W0-W7*/	"W0", "W1", "W2", "W3", "W4", "W5", "W6", "W7",
+	/*X0-X7*/	"X0", "X1", "X2", "X3", "X4", "X5", "X6", "X7",
+	/*Y0-Y7*/	"Y0", "Y1", "Y2", "Y3", "Y4", "Y5", "Y6", "Y7",
+	/*Z0-Z7*/	"Z0", "Z1", "Z2", "Z3", "Z4", "Z5", "Z6", "Z7",
+	/*AA0-AA7*/	"AA0", "AA1", "AA2", "AA3", "AA4", "AA5", "AA6", "AA7",
+	/*AB0-AB7*/	"AB0", "AB1", "AB2", "AB3", "AB4", "AB5", "AB6", "AB7",
+	/*AC0-AC7*/	"AC0", "AC1", "AC2", "AC3", "AC4", "AC5", "AC6", "AC7";
+};
+&sgpio {
+	status = "okay";
+	ngpios = <80>;
+
+	/* https://github.com/torvalds/linux/commit/ac67b07e268d46eba675a60c37051bb3e59fd201#diff-fd5dd6aa1b0191537084c0f9adbcc357f960884db2677cf4ee727a54dc8d4893 */
+	/* This change expands the maximum number of GPIOs to 160; the lower half
+	* of this range are the input-only GPIOs, the upper half are the outputs.
+	*/
+	gpio-line-names =
+	/* SGPIO input lines */
+	/*IA0-IA7*/ "IA0","IA1","IA2","IA3","IA4","IA5","IA6","IA7",
+	/*IB0-IB7*/ "IB0","IB1","IB2","IB3","IB4","IB5","IB6","IB7",
+	/*IC0-IC7*/ "IC0","IC1","IC2","IC3","IC4","IC5","IC6","IC7",
+	/*ID0-ID7*/ "ID0","ID1","ID2","ID3","ID4","ID5","ID6","ID7",
+	/*IE0-IE7*/ "IE0","IE1","IE2","IE3","IE4","IE5","IE6","IE7",
+	/*IF0-IF7*/ "IF0","IF1","IF2","IF3","IF4","IF5","IF6","IF7",
+	/*IG0-IG7*/ "IG0","IG1","IG2","IG3","IG4","IG5","IG6","IG7",
+	/*IH0-IH7*/ "IH0","IH1","IH2","IH3","IH4","IH5","IH6","IH7",
+	/*II0-II7*/ "II0","II1","II2","II3","II4","II5","II6","II7",
+	/*IJ0-IJ7*/ "IJ0","IJ1","IJ2","SGPMI","IJ4","IJ5","IJ6","IJ7",
+
+	/* SGPIO output lines */
+	/*OA0-OA7*/ "OA0","OA1","OA2","OA3","OA4","OA5","OA6","OA7",
+	/*OB0-OB7*/ "OB0","OB1","OB2","OB3","OB4","OB5","OB6","OB7",
+	/*OC0-OC7*/ "OC0","OC1","OC2","OC3","OC4","OC5","OC6","OC7",
+	/*OD0-OD7*/ "OD0","OD1","OD2","OD3","OD4","OD5","OD6","OD7",
+	/*OE0-OE7*/ "OE0","OE1","OE2","OE3","OE4","OE5","OE6","OE7",
+	/*OF0-OF7*/ "OF0","OF1","OF2","OF3","OF4","OF5","OF6","OF7",
+	/*OG0-OG7*/ "OG0","OG1","OG2","OG3","OG4","OG5","OG6","OG7",
+	/*OH0-OH7*/ "OH0","OH1","OH2","OH3","OH4","OH5","OH6","OH7",
+	/*OI0-OI7*/ "OI0","OI1","OI2","OI3","OI4","OI5","OI6","OI7",
+	/*OJ0-OJ7*/ "SGPMCK","SGPMLD","SGPMO","OJ3","OJ4","OJ5","OJ6","OJ7";
+};
+
+/* This is UART to rear COM (VGACOM_1) */
+&uart1 {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_txd1_default &pinctrl_rxd1_default>;
+};
+
+/* This is console UART */
+&uart5 {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <>;
+};
+
+&uart_routing {
+	status = "okay";
+};
+
+&mac0 {
+	status = "disabled";
+};
+
+&mac1 {
+	status = "okay";
+
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_rgmii2_default &pinctrl_mdio2_default>;
+};
+
+&i2c0 {
+	bus-frequency = <100000>;
+	general-call;
+	aspeed,dma-buf-size = <4095>;
+	aspeed,hw-timeout-ms = <300>;
+	status = "okay";
+};
+
+&i2c1 {
+	bus-frequency = <100000>;
+	aspeed,dma-buf-size = <4095>;
+	aspeed,hw-timeout-ms = <300>;
+	status = "okay";
+};
+
+&i2c2 {
+	bus-frequency = <100000>;
+	aspeed,dma-buf-size = <4095>;
+	aspeed,hw-timeout-ms = <300>;
+	status = "okay";
+};
+
+&i2c3 {
+	bus-frequency = <100000>;
+	aspeed,dma-buf-size = <4095>;
+	aspeed,hw-timeout-ms = <300>;
+	status = "okay";
+};
+
+&i2c4 {
+	bus-frequency = <100000>;
+	aspeed,dma-buf-size = <4095>;
+	aspeed,hw-timeout-ms = <300>;
+	status = "okay";
+};
+
+&i2c5 {
+	bus-frequency = <100000>;
+	aspeed,dma-buf-size = <4095>;
+	aspeed,hw-timeout-ms = <300>;
+	status = "okay";
+
+	i2c-switch@70 {
+		compatible = "nxp,pca9545";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0x70>;
+		i2c-mux-idle-disconnect;
+
+		i2c5_sw_ch0: i2c@0 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0>;
+		};
+		i2c5_sw_ch1: i2c@1 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <1>;
+		};
+		i2c5_sw_ch2: i2c@2 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <2>;
+		};
+		i2c5_sw_ch3: i2c@3 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <3>;
+		};
+	};
+};
+
+&i2c6 {
+	bus-frequency = <100000>;
+	aspeed,dma-buf-size = <4095>;
+	aspeed,hw-timeout-ms = <300>;
+	status = "okay";
+};
+
+&i2c7 {
+	bus-frequency = <100000>;
+	aspeed,dma-buf-size = <4095>;
+	aspeed,hw-timeout-ms = <300>;
+	status = "okay";
+
+	fru@0x51 {
+		compatible = "atmel,24c256";
+		reg = <0x51>;
+	};
+	i2c-switch@70 {
+		compatible = "nxp,pca9548";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0x70>;
+		i2c-mux-idle-disconnect;
+
+		i2c7_sw_ch0: i2c@0 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0>;
+		};
+		i2c7_sw_ch1: i2c@1 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <1>;
+		};
+		i2c7_sw_ch2: i2c@2 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <2>;
+		};
+		i2c7_sw_ch3: i2c@3 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <3>;
+		};
+		i2c7_sw_ch4: i2c@4 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <4>;
+		};
+		i2c7_sw_ch5: i2c@5 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <5>;
+		};
+		i2c7_sw_ch6: i2c@6 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <6>;
+		};
+		i2c7_sw_ch7: i2c@7 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <7>;
+		};
+	};
+};
+
+&i2c8 {
+	bus-frequency = <100000>;
+	aspeed,dma-buf-size = <4095>;
+	aspeed,hw-timeout-ms = <300>;
+	status = "okay";
+
+	i2c-switch@70 {
+		compatible = "nxp,pca9548";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0x70>;
+		i2c-mux-idle-disconnect;
+
+		i2c8_sw_ch0: i2c@0 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0>;
+		};
+		i2c8_sw_ch1: i2c@1 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <1>;
+		};
+		i2c8_sw_ch2: i2c@2 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <2>;
+		};
+		i2c8_sw_ch3: i2c@3 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <3>;
+		};
+		i2c8_sw_ch4: i2c@4 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <4>;
+		};
+		i2c8_sw_ch5: i2c@5 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <5>;
+		};
+		i2c8_sw_ch6: i2c@6 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <6>;
+		};
+	};
+};
+
+&i2c9 {
+	bus-frequency = <100000>;
+	aspeed,dma-buf-size = <4095>;
+	aspeed,hw-timeout-ms = <300>;
+	status = "okay";
+
+	i2c-switch@70 {
+		compatible = "nxp,pca9548";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0x70>;
+		i2c-mux-idle-disconnect;
+
+		i2c9_sw_ch0: i2c@0 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0>;
+		};
+		i2c9_sw_ch1: i2c@1 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <1>;
+		};
+		i2c9_sw_ch2: i2c@2 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <2>;
+		};
+		i2c9_sw_ch3: i2c@3 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <3>;
+		};
+		i2c9_sw_ch4: i2c@4 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <4>;
+		};
+		i2c9_sw_ch5: i2c@5 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <5>;
+		};
+		i2c9_sw_ch6: i2c@6 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <6>;
+		};
+		i2c9_sw_ch7: i2c@7 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <7>;
+		};
+	};
+};
+
+&rtc {
+	status = "okay";
+};

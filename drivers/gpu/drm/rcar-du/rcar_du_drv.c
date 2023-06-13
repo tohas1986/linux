@@ -20,13 +20,15 @@
 
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_drv.h>
+#include <drm/drm_fb_cma_helper.h>
 #include <drm/drm_fb_helper.h>
-#include <drm/drm_gem_dma_helper.h>
+#include <drm/drm_gem_cma_helper.h>
 #include <drm/drm_managed.h>
 #include <drm/drm_probe_helper.h>
 
 #include "rcar_du_drv.h"
 #include "rcar_du_kms.h"
+#include "rcar_du_regs.h"
 
 /* -----------------------------------------------------------------------------
  * Device Information
@@ -506,8 +508,7 @@ static const struct rcar_du_device_info rcar_du_r8a7799x_info = {
 static const struct rcar_du_device_info rcar_du_r8a779a0_info = {
 	.gen = 3,
 	.features = RCAR_DU_FEATURE_CRTC_IRQ
-		  | RCAR_DU_FEATURE_VSP1_SOURCE
-		  | RCAR_DU_FEATURE_NO_BLENDING,
+		  | RCAR_DU_FEATURE_VSP1_SOURCE,
 	.channels_mask = BIT(1) | BIT(0),
 	.routes = {
 		/* R8A779A0 has two MIPI DSI outputs. */
@@ -578,7 +579,7 @@ const char *rcar_du_output_name(enum rcar_du_output output)
  * DRM operations
  */
 
-DEFINE_DRM_GEM_DMA_FOPS(rcar_du_fops);
+DEFINE_DRM_GEM_CMA_FOPS(rcar_du_fops);
 
 static const struct drm_driver rcar_du_driver = {
 	.driver_features	= DRIVER_GEM | DRIVER_MODESET | DRIVER_ATOMIC,

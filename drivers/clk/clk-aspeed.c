@@ -14,7 +14,9 @@
 
 #include "clk-aspeed.h"
 
-#define ASPEED_NUM_CLKS		38
+#define ASPEED_NUM_CLKS	ASPEED_CLK_MAX
+#define UART_HIGH_SPEED_CLK	192000000
+#define UART_LOW_SPEED_CLK	24000000
 
 #define ASPEED_RESET2_OFFSET	32
 
@@ -29,6 +31,12 @@
 #define ASPEED_MISC_CTRL	0x2c
 #define  UART_DIV13_EN		BIT(12)
 #define ASPEED_MAC_CLK_DLY	0x48
+#define ASPEED_MISC2_CTRL	0x4c
+#define  UART1_HS_CLK_EN	BIT(24)
+#define  UART2_HS_CLK_EN	BIT(25)
+#define  UART3_HS_CLK_EN	BIT(26)
+#define  UART4_HS_CLK_EN	BIT(27)
+#define  UART5_HS_CLK_EN	BIT(28)
 #define ASPEED_STRAP		0x70
 #define  CLKIN_25MHZ_EN		BIT(23)
 #define  AST2400_CLK_SOURCE_SEL	BIT(18)
@@ -59,8 +67,8 @@ static const struct aspeed_gate_data aspeed_gates[] = {
 	[ASPEED_CLK_GATE_D1CLK] =	{ 10, 13, "d1clk-gate",		NULL,	0 }, /* GFX CRT */
 	[ASPEED_CLK_GATE_YCLK] =	{ 13,  4, "yclk-gate",		NULL,	0 }, /* HAC */
 	[ASPEED_CLK_GATE_USBPORT1CLK] = { 14, 14, "usb-port1-gate",	NULL,	0 }, /* USB2 hub/USB2 host port 1/USB1.1 dev */
-	[ASPEED_CLK_GATE_UART1CLK] =	{ 15, -1, "uart1clk-gate",	"uart",	0 }, /* UART1 */
-	[ASPEED_CLK_GATE_UART2CLK] =	{ 16, -1, "uart2clk-gate",	"uart",	0 }, /* UART2 */
+	[ASPEED_CLK_GATE_UART1CLK] =	{ 15, -1, "uart1clk-gate",	"uart",	CLK_IS_CRITICAL }, /* UART1 */
+	[ASPEED_CLK_GATE_UART2CLK] =	{ 16, -1, "uart2clk-gate",	"uart",	CLK_IS_CRITICAL }, /* UART2 */
 	[ASPEED_CLK_GATE_UART5CLK] =	{ 17, -1, "uart5clk-gate",	"uart",	0 }, /* UART5 */
 	[ASPEED_CLK_GATE_ESPICLK] =	{ 19, -1, "espiclk-gate",	NULL,	0 }, /* eSPI */
 	[ASPEED_CLK_GATE_MAC1CLK] =	{ 20, 11, "mac1clk-gate",	"mac",	0 }, /* MAC1 */
@@ -386,7 +394,7 @@ static int aspeed_clk_probe(struct platform_device *pdev)
 	struct aspeed_reset *ar;
 	struct regmap *map;
 	struct clk_hw *hw;
-	u32 val, rate;
+	u32 val, rate, rate_hi;
 	int i, ret;
 
 	map = syscon_node_to_regmap(dev->of_node);
@@ -420,15 +428,25 @@ static int aspeed_clk_probe(struct platform_device *pdev)
 
 	/* UART clock div13 setting */
 	regmap_read(map, ASPEED_MISC_CTRL, &val);
-	if (val & UART_DIV13_EN)
-		rate = 24000000 / 13;
-	else
-		rate = 24000000;
+	if (val & UART_DIV13_EN) {
+		rate = UART_LOW_SPEED_CLK / 13;
+		rate_hi = UART_HIGH_SPEED_CLK / 13;
+	} else {
+		rate = UART_LOW_SPEED_CLK;
+		rate_hi = UART_HIGH_SPEED_CLK;
+	}
+
 	/* TODO: Find the parent data for the uart clock */
 	hw = clk_hw_register_fixed_rate(dev, "uart", NULL, 0, rate);
 	if (IS_ERR(hw))
 		return PTR_ERR(hw);
 	aspeed_clk_data->hws[ASPEED_CLK_UART] = hw;
+
+	hw = clk_hw_register_fixed_rate(dev, "uart-hs", "usb-port1-gate", 0,
+					rate_hi);
+	if (IS_ERR(hw))
+		return PTR_ERR(hw);
+	aspeed_clk_data->hws[ASPEED_CLK_UART_HS] = hw;
 
 	/*
 	 * Memory controller (M-PLL) PLL. This clock is configured by the
@@ -539,9 +557,23 @@ static int aspeed_clk_probe(struct platform_device *pdev)
 	 *   UART[1..5] clock source mux
 	 */
 
+	/* Get the uart clock source configuration from SCU4C*/
+	regmap_read(map, ASPEED_MISC2_CTRL, &val);
+
 	for (i = 0; i < ARRAY_SIZE(aspeed_gates); i++) {
 		const struct aspeed_gate_data *gd = &aspeed_gates[i];
 		u32 gate_flags;
+		char *parent_name;
+
+		/* For uart, needs to adjust the clock based on SCU4C value */
+		if ((i == ASPEED_CLK_GATE_UART1CLK && (val & UART1_HS_CLK_EN)) ||
+		    (i == ASPEED_CLK_GATE_UART2CLK && (val & UART2_HS_CLK_EN)) ||
+		    (i == ASPEED_CLK_GATE_UART5CLK && (val & UART5_HS_CLK_EN)) ||
+		    (i == ASPEED_CLK_GATE_UART3CLK && (val & UART3_HS_CLK_EN)) ||
+		    (i == ASPEED_CLK_GATE_UART4CLK && (val & UART4_HS_CLK_EN)))
+			parent_name = "uart-hs";
+		else
+			parent_name = gd->parent_name;
 
 		/* Special case: the USB port 1 clock (bit 14) is always
 		 * working the opposite way from the other ones.
@@ -549,7 +581,7 @@ static int aspeed_clk_probe(struct platform_device *pdev)
 		gate_flags = (gd->clock_idx == 14) ? 0 : CLK_GATE_SET_TO_DISABLE;
 		hw = aspeed_clk_hw_register_gate(dev,
 				gd->name,
-				gd->parent_name,
+				parent_name,
 				gd->flags,
 				map,
 				gd->clock_idx,

@@ -1099,7 +1099,7 @@ static int rtw_wx_set_scan(struct net_device *dev, struct iw_request_info *a,
 
 			spin_lock_bh(&pmlmepriv->lock);
 
-			_status = rtw_sitesurvey_cmd(padapter, ssid, 1);
+			_status = rtw_sitesurvey_cmd(padapter, ssid, 1, NULL, 0);
 
 			spin_unlock_bh(&pmlmepriv->lock);
 		}
@@ -1836,7 +1836,7 @@ static int rtw_wx_set_enc_ext(struct net_device *dev,
 		goto out;
 	}
 
-	strscpy((char *)param->u.crypt.alg, alg_name, IEEE_CRYPT_ALG_NAME_LEN);
+	strlcpy((char *)param->u.crypt.alg, alg_name, IEEE_CRYPT_ALG_NAME_LEN);
 
 	if (pext->ext_flags & IW_ENCODE_EXT_SET_TX_KEY)
 		param->u.crypt.set_tx = 1;
@@ -2079,7 +2079,7 @@ static int rtw_wext_p2p_enable(struct net_device *dev,
 			       struct iw_request_info *info,
 			       union iwreq_data *wrqu, char *extra)
 {
-	int ret;
+	int ret = 0;
 	struct adapter *padapter = (struct adapter *)rtw_netdev_priv(dev);
 	struct wifidirect_info *pwdinfo = &padapter->wdinfo;
 	struct mlme_ext_priv	*pmlmeext = &padapter->mlmeextpriv;
@@ -2094,9 +2094,10 @@ static int rtw_wext_p2p_enable(struct net_device *dev,
 	else if (*extra == '3')
 		init_role = P2P_ROLE_GO;
 
-	ret = rtw_p2p_enable(padapter, init_role);
-	if (ret)
-		return ret;
+	if (_FAIL == rtw_p2p_enable(padapter, init_role)) {
+		ret = -EFAULT;
+		goto exit;
+	}
 
 	/* set channel/bandwidth */
 	if (init_role != P2P_ROLE_DISABLE) {
@@ -2120,7 +2121,8 @@ static int rtw_wext_p2p_enable(struct net_device *dev,
 		set_channel_bwmode(padapter, channel, ch_offset, bwmode);
 	}
 
-	return 0;
+exit:
+	return ret;
 }
 
 static void rtw_p2p_set_go_nego_ssid(struct net_device *dev,

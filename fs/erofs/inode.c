@@ -241,7 +241,7 @@ static int erofs_fill_symlink(struct inode *inode, void *kaddr,
 	return 0;
 }
 
-static int erofs_fill_inode(struct inode *inode)
+static int erofs_fill_inode(struct inode *inode, int isdir)
 {
 	struct erofs_inode *vi = EROFS_I(inode);
 	struct erofs_buf buf = __EROFS_BUF_INITIALIZER;
@@ -249,7 +249,7 @@ static int erofs_fill_inode(struct inode *inode)
 	unsigned int ofs;
 	int err = 0;
 
-	trace_erofs_fill_inode(inode);
+	trace_erofs_fill_inode(inode, isdir);
 
 	/* read inode base data from disk */
 	kaddr = erofs_read_inode(&buf, inode, &ofs);
@@ -324,13 +324,21 @@ static int erofs_iget_set_actor(struct inode *inode, void *opaque)
 	return 0;
 }
 
-struct inode *erofs_iget(struct super_block *sb, erofs_nid_t nid)
+static inline struct inode *erofs_iget_locked(struct super_block *sb,
+					      erofs_nid_t nid)
 {
 	const unsigned long hashval = erofs_inode_hash(nid);
-	struct inode *inode;
 
-	inode = iget5_locked(sb, hashval, erofs_ilookup_test_actor,
+	return iget5_locked(sb, hashval, erofs_ilookup_test_actor,
 		erofs_iget_set_actor, &nid);
+}
+
+struct inode *erofs_iget(struct super_block *sb,
+			 erofs_nid_t nid,
+			 bool isdir)
+{
+	struct inode *inode = erofs_iget_locked(sb, nid);
+
 	if (!inode)
 		return ERR_PTR(-ENOMEM);
 
@@ -340,10 +348,10 @@ struct inode *erofs_iget(struct super_block *sb, erofs_nid_t nid)
 
 		vi->nid = nid;
 
-		err = erofs_fill_inode(inode);
-		if (!err) {
+		err = erofs_fill_inode(inode, isdir);
+		if (!err)
 			unlock_new_inode(inode);
-		} else {
+		else {
 			iget_failed(inode);
 			inode = ERR_PTR(err);
 		}

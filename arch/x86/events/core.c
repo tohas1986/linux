@@ -72,10 +72,6 @@ DEFINE_STATIC_CALL_NULL(x86_pmu_add,  *x86_pmu.add);
 DEFINE_STATIC_CALL_NULL(x86_pmu_del,  *x86_pmu.del);
 DEFINE_STATIC_CALL_NULL(x86_pmu_read, *x86_pmu.read);
 
-DEFINE_STATIC_CALL_NULL(x86_pmu_set_period,   *x86_pmu.set_period);
-DEFINE_STATIC_CALL_NULL(x86_pmu_update,       *x86_pmu.update);
-DEFINE_STATIC_CALL_NULL(x86_pmu_limit_period, *x86_pmu.limit_period);
-
 DEFINE_STATIC_CALL_NULL(x86_pmu_schedule_events,       *x86_pmu.schedule_events);
 DEFINE_STATIC_CALL_NULL(x86_pmu_get_event_constraints, *x86_pmu.get_event_constraints);
 DEFINE_STATIC_CALL_NULL(x86_pmu_put_event_constraints, *x86_pmu.put_event_constraints);
@@ -119,6 +115,9 @@ u64 x86_perf_event_update(struct perf_event *event)
 
 	if (unlikely(!hwc->event_base))
 		return 0;
+
+	if (unlikely(is_topdown_count(event)) && x86_pmu.update_topdown_event)
+		return x86_pmu.update_topdown_event(event);
 
 	/*
 	 * Careful: an NMI might modify the previous event value.
@@ -622,9 +621,8 @@ int x86_pmu_hw_config(struct perf_event *event)
 		event->hw.config |= event->attr.config & X86_RAW_EVENT_MASK;
 
 	if (event->attr.sample_period && x86_pmu.limit_period) {
-		s64 left = event->attr.sample_period;
-		x86_pmu.limit_period(event, &left);
-		if (left > event->attr.sample_period)
+		if (x86_pmu.limit_period(event, event->attr.sample_period) >
+				event->attr.sample_period)
 			return -EINVAL;
 	}
 
@@ -1356,7 +1354,7 @@ static void x86_pmu_enable(struct pmu *pmu)
 	static_call(x86_pmu_enable_all)(added);
 }
 
-DEFINE_PER_CPU(u64 [X86_PMC_IDX_MAX], pmc_prev_left);
+static DEFINE_PER_CPU(u64 [X86_PMC_IDX_MAX], pmc_prev_left);
 
 /*
  * Set the next IRQ period, based on the hwc->period_left value.
@@ -1371,6 +1369,10 @@ int x86_perf_event_set_period(struct perf_event *event)
 
 	if (unlikely(!hwc->event_base))
 		return 0;
+
+	if (unlikely(is_topdown_count(event)) &&
+	    x86_pmu.set_topdown_event_period)
+		return x86_pmu.set_topdown_event_period(event);
 
 	/*
 	 * If we are way outside a reasonable range then just skip forward:
@@ -1397,9 +1399,10 @@ int x86_perf_event_set_period(struct perf_event *event)
 	if (left > x86_pmu.max_period)
 		left = x86_pmu.max_period;
 
-	static_call_cond(x86_pmu_limit_period)(event, &left);
+	if (x86_pmu.limit_period)
+		left = x86_pmu.limit_period(event, left);
 
-	this_cpu_write(pmc_prev_left[idx], left);
+	per_cpu(pmc_prev_left[idx], smp_processor_id()) = left;
 
 	/*
 	 * The hw event starts counting from this event offset,
@@ -1415,6 +1418,16 @@ int x86_perf_event_set_period(struct perf_event *event)
 	 */
 	if (is_counter_pair(hwc))
 		wrmsrl(x86_pmu_event_addr(idx + 1), 0xffff);
+
+	/*
+	 * Due to erratum on certan cpu we need
+	 * a second write to be sure the register
+	 * is updated properly
+	 */
+	if (x86_pmu.perfctr_second_write) {
+		wrmsrl(hwc->event_base,
+			(u64)(-left) & x86_pmu.cntval_mask);
+	}
 
 	perf_event_update_userpage(event);
 
@@ -1505,7 +1518,7 @@ static void x86_pmu_start(struct perf_event *event, int flags)
 
 	if (flags & PERF_EF_RELOAD) {
 		WARN_ON_ONCE(!(event->hw.state & PERF_HES_UPTODATE));
-		static_call(x86_pmu_set_period)(event);
+		x86_perf_event_set_period(event);
 	}
 
 	event->hw.state = 0;
@@ -1597,7 +1610,7 @@ void x86_pmu_stop(struct perf_event *event, int flags)
 		 * Drain the remaining delta count out of a event
 		 * that we are disabling:
 		 */
-		static_call(x86_pmu_update)(event);
+		x86_perf_event_update(event);
 		hwc->state |= PERF_HES_UPTODATE;
 	}
 }
@@ -1687,7 +1700,7 @@ int x86_pmu_handle_irq(struct pt_regs *regs)
 
 		event = cpuc->events[idx];
 
-		val = static_call(x86_pmu_update)(event);
+		val = x86_perf_event_update(event);
 		if (val & (1ULL << (x86_pmu.cntval_bits - 1)))
 			continue;
 
@@ -1696,15 +1709,13 @@ int x86_pmu_handle_irq(struct pt_regs *regs)
 		 */
 		handled++;
 
-		if (!static_call(x86_pmu_set_period)(event))
+		if (!x86_perf_event_set_period(event))
 			continue;
 
 		perf_sample_data_init(&data, 0, event->hw.last_period);
 
-		if (has_branch_stack(event)) {
+		if (has_branch_stack(event))
 			data.br_stack = &cpuc->lbr_stack;
-			data.sample_flags |= PERF_SAMPLE_BRANCH_STACK;
-		}
 
 		if (perf_event_overflow(event, &data, regs))
 			x86_pmu_stop(event, 0);
@@ -2012,10 +2023,6 @@ static void x86_pmu_static_call_update(void)
 	static_call_update(x86_pmu_del, x86_pmu.del);
 	static_call_update(x86_pmu_read, x86_pmu.read);
 
-	static_call_update(x86_pmu_set_period, x86_pmu.set_period);
-	static_call_update(x86_pmu_update, x86_pmu.update);
-	static_call_update(x86_pmu_limit_period, x86_pmu.limit_period);
-
 	static_call_update(x86_pmu_schedule_events, x86_pmu.schedule_events);
 	static_call_update(x86_pmu_get_event_constraints, x86_pmu.get_event_constraints);
 	static_call_update(x86_pmu_put_event_constraints, x86_pmu.put_event_constraints);
@@ -2035,7 +2042,7 @@ static void x86_pmu_static_call_update(void)
 
 static void _x86_pmu_read(struct perf_event *event)
 {
-	static_call(x86_pmu_update)(event);
+	x86_perf_event_update(event);
 }
 
 void x86_pmu_show_pmu_cap(int num_counters, int num_counters_fixed,
@@ -2141,12 +2148,6 @@ static int __init init_hw_perf_events(void)
 
 	if (!x86_pmu.guest_get_msrs)
 		x86_pmu.guest_get_msrs = (void *)&__static_call_return0;
-
-	if (!x86_pmu.set_period)
-		x86_pmu.set_period = x86_perf_event_set_period;
-
-	if (!x86_pmu.update)
-		x86_pmu.update = x86_perf_event_update;
 
 	x86_pmu_static_call_update();
 
@@ -2669,9 +2670,7 @@ static int x86_pmu_check_period(struct perf_event *event, u64 value)
 		return -EINVAL;
 
 	if (value && x86_pmu.limit_period) {
-		s64 left = value;
-		x86_pmu.limit_period(event, &left);
-		if (left > value)
+		if (x86_pmu.limit_period(event, value) > value)
 			return -EINVAL;
 	}
 
@@ -2994,19 +2993,17 @@ unsigned long perf_misc_flags(struct pt_regs *regs)
 
 void perf_get_x86_pmu_capability(struct x86_pmu_capability *cap)
 {
-	/* This API doesn't currently support enumerating hybrid PMUs. */
-	if (WARN_ON_ONCE(cpu_feature_enabled(X86_FEATURE_HYBRID_CPU)) ||
-	    !x86_pmu_initialized()) {
+	if (!x86_pmu_initialized()) {
 		memset(cap, 0, sizeof(*cap));
 		return;
 	}
 
-	/*
-	 * Note, hybrid CPU models get tracked as having hybrid PMUs even when
-	 * all E-cores are disabled via BIOS.  When E-cores are disabled, the
-	 * base PMU holds the correct number of counters for P-cores.
-	 */
 	cap->version		= x86_pmu.version;
+	/*
+	 * KVM doesn't support the hybrid PMU yet.
+	 * Return the common value in global x86_pmu,
+	 * which available for all cores.
+	 */
 	cap->num_counters_gp	= x86_pmu.num_counters;
 	cap->num_counters_fixed	= x86_pmu.num_counters_fixed;
 	cap->bit_width_gp	= x86_pmu.cntval_bits;

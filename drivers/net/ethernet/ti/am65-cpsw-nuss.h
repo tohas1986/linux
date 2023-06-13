@@ -46,7 +46,6 @@ struct am65_cpsw_port {
 	const char			*name;
 	u32				port_id;
 	void __iomem			*port_base;
-	void __iomem			*sgmii_base;
 	void __iomem			*stat_base;
 	void __iomem			*fetch_ram_base;
 	bool				disabled;
@@ -86,11 +85,9 @@ struct am65_cpsw_rx_chn {
 };
 
 #define AM65_CPSW_QUIRK_I2027_NO_TX_CSUM BIT(0)
-#define AM64_CPSW_QUIRK_DMA_RX_TDOWN_IRQ BIT(1)
 
 struct am65_cpsw_pdata {
 	u32	quirks;
-	u64	extra_modes;
 	enum k3_ring_mode fdqring_mode;
 	const char	*ale_dev_id;
 };

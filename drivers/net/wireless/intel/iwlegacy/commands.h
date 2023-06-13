@@ -1710,7 +1710,7 @@ struct il4965_tx_resp {
 	 */
 	union {
 		__le32 status;
-		DECLARE_FLEX_ARRAY(struct agg_tx_status, agg_status);	/* for each agg frame */
+		struct agg_tx_status agg_status[0];	/* for each agg frame */
 	} u;
 } __packed;
 
@@ -3365,7 +3365,7 @@ struct il_rx_pkt {
 		struct il_compressed_ba_resp compressed_ba;
 		struct il_missed_beacon_notif missed_beacon;
 		__le32 status;
-		DECLARE_FLEX_ARRAY(u8, raw);
+		u8 raw[0];
 	} u;
 } __packed;
 

@@ -12,7 +12,6 @@ rtw89_core-y += core.o \
 		sar.o \
 		coex.o \
 		ps.o \
-		chan.o \
 		ser.o
 
 obj-$(CONFIG_RTW89_8852A) += rtw89_8852a.o

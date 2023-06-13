@@ -96,8 +96,8 @@ MODULE_PARM_DESC(ratelimit_disable, "Disable random ratelimit suppression");
 /*
  * Returns whether or not the input pool has been seeded and thus guaranteed
  * to supply cryptographically secure random numbers. This applies to: the
- * /dev/urandom device, the get_random_bytes function, and the get_random_{u8,
- * u16,u32,u64,long} family of functions.
+ * /dev/urandom device, the get_random_bytes function, and the get_random_{u32,
+ * ,u64,int,long} family of functions.
  *
  * Returns: true if the input pool has been seeded.
  *          false if the input pool has not been seeded.
@@ -119,9 +119,9 @@ static void try_to_generate_entropy(void);
 /*
  * Wait for the input pool to be seeded and thus guaranteed to supply
  * cryptographically secure random numbers. This applies to: the /dev/urandom
- * device, the get_random_bytes function, and the get_random_{u8,u16,u32,u64,
- * int,long} family of functions. Using any of these functions without first
- * calling this function forfeits the guarantee of security.
+ * device, the get_random_bytes function, and the get_random_{u32,u64,int,long}
+ * family of functions. Using any of these functions without first calling
+ * this function forfeits the guarantee of security.
  *
  * Returns: 0 if the input pool has been seeded.
  *          -ERESTARTSYS if the function was interrupted by a signal.
@@ -157,18 +157,14 @@ EXPORT_SYMBOL(wait_for_random_bytes);
  * There are a few exported interfaces for use by other drivers:
  *
  *	void get_random_bytes(void *buf, size_t len)
- *	u8 get_random_u8()
- *	u16 get_random_u16()
  *	u32 get_random_u32()
- *	u32 get_random_u32_below(u32 ceil)
- *	u32 get_random_u32_above(u32 floor)
- *	u32 get_random_u32_inclusive(u32 floor, u32 ceil)
  *	u64 get_random_u64()
+ *	unsigned int get_random_int()
  *	unsigned long get_random_long()
  *
  * These interfaces will return the requested number of random bytes
  * into the given buffer or as a return value. This is equivalent to
- * a read from /dev/urandom. The u8, u16, u32, u64, long family of
+ * a read from /dev/urandom. The u32, u64, int, and long family of
  * functions may be higher performance for one-off random integers,
  * because they do a bit of buffering and do not invoke reseeding
  * until the buffer is emptied.
@@ -264,23 +260,25 @@ static void crng_fast_key_erasure(u8 key[CHACHA_KEY_SIZE],
 }
 
 /*
- * Return the interval until the next reseeding, which is normally
- * CRNG_RESEED_INTERVAL, but during early boot, it is at an interval
+ * Return whether the crng seed is considered to be sufficiently old
+ * that a reseeding is needed. This happens if the last reseeding
+ * was CRNG_RESEED_INTERVAL ago, or during early boot, at an interval
  * proportional to the uptime.
  */
-static unsigned int crng_reseed_interval(void)
+static bool crng_has_old_seed(void)
 {
 	static bool early_boot = true;
+	unsigned long interval = CRNG_RESEED_INTERVAL;
 
 	if (unlikely(READ_ONCE(early_boot))) {
 		time64_t uptime = ktime_get_seconds();
 		if (uptime >= CRNG_RESEED_INTERVAL / HZ * 2)
 			WRITE_ONCE(early_boot, false);
 		else
-			return max_t(unsigned int, CRNG_RESEED_START_INTERVAL,
-				     (unsigned int)uptime / 2 * HZ);
+			interval = max_t(unsigned int, CRNG_RESEED_START_INTERVAL,
+					 (unsigned int)uptime / 2 * HZ);
 	}
-	return CRNG_RESEED_INTERVAL;
+	return time_is_before_jiffies(READ_ONCE(base_crng.birth) + interval);
 }
 
 /*
@@ -322,7 +320,7 @@ static void crng_make_state(u32 chacha_state[CHACHA_STATE_WORDS],
 	 * If the base_crng is old enough, we reseed, which in turn bumps the
 	 * generation counter that we check below.
 	 */
-	if (unlikely(time_is_before_jiffies(READ_ONCE(base_crng.birth) + crng_reseed_interval())))
+	if (unlikely(crng_has_old_seed()))
 		crng_reseed();
 
 	local_lock_irqsave(&crngs.lock, flags);
@@ -386,11 +384,11 @@ static void _get_random_bytes(void *buf, size_t len)
 }
 
 /*
- * This function is the exported kernel interface. It returns some number of
- * good random numbers, suitable for key generation, seeding TCP sequence
- * numbers, etc. In order to ensure that the randomness returned by this
- * function is okay, the function wait_for_random_bytes() should be called and
- * return 0 at least once at any point prior.
+ * This function is the exported kernel interface.  It returns some
+ * number of good random numbers, suitable for key generation, seeding
+ * TCP sequence numbers, etc. In order to ensure that the randomness
+ * by this function is okay, the function wait_for_random_bytes()
+ * should be called and return 0 at least once at any point prior.
  */
 void get_random_bytes(void *buf, size_t len)
 {
@@ -508,45 +506,8 @@ type get_random_ ##type(void)							\
 }										\
 EXPORT_SYMBOL(get_random_ ##type);
 
-DEFINE_BATCHED_ENTROPY(u8)
-DEFINE_BATCHED_ENTROPY(u16)
-DEFINE_BATCHED_ENTROPY(u32)
 DEFINE_BATCHED_ENTROPY(u64)
-
-u32 __get_random_u32_below(u32 ceil)
-{
-	/*
-	 * This is the slow path for variable ceil. It is still fast, most of
-	 * the time, by doing traditional reciprocal multiplication and
-	 * opportunistically comparing the lower half to ceil itself, before
-	 * falling back to computing a larger bound, and then rejecting samples
-	 * whose lower half would indicate a range indivisible by ceil. The use
-	 * of `-ceil % ceil` is analogous to `2^32 % ceil`, but is computable
-	 * in 32-bits.
-	 */
-	u32 rand = get_random_u32();
-	u64 mult;
-
-	/*
-	 * This function is technically undefined for ceil == 0, and in fact
-	 * for the non-underscored constant version in the header, we build bug
-	 * on that. But for the non-constant case, it's convenient to have that
-	 * evaluate to being a straight call to get_random_u32(), so that
-	 * get_random_u32_inclusive() can work over its whole range without
-	 * undefined behavior.
-	 */
-	if (unlikely(!ceil))
-		return rand;
-
-	mult = (u64)ceil * rand;
-	if (unlikely((u32)mult < ceil)) {
-		u32 bound = -ceil % ceil;
-		while (unlikely((u32)mult < bound))
-			mult = (u64)ceil * get_random_u32();
-	}
-	return mult >> 32;
-}
-EXPORT_SYMBOL(__get_random_u32_below);
+DEFINE_BATCHED_ENTROPY(u32)
 
 #ifdef CONFIG_SMP
 /*
@@ -561,8 +522,6 @@ int __cold random_prepare_cpu(unsigned int cpu)
 	 * randomness.
 	 */
 	per_cpu_ptr(&crngs, cpu)->generation = ULONG_MAX;
-	per_cpu_ptr(&batched_entropy_u8, cpu)->position = UINT_MAX;
-	per_cpu_ptr(&batched_entropy_u16, cpu)->position = UINT_MAX;
 	per_cpu_ptr(&batched_entropy_u32, cpu)->position = UINT_MAX;
 	per_cpu_ptr(&batched_entropy_u64, cpu)->position = UINT_MAX;
 	return 0;
@@ -815,13 +774,18 @@ static int random_pm_notification(struct notifier_block *nb, unsigned long actio
 static struct notifier_block pm_notifier = { .notifier_call = random_pm_notification };
 
 /*
- * This is called extremely early, before time keeping functionality is
- * available, but arch randomness is. Interrupts are not yet enabled.
+ * The first collection of entropy occurs at system boot while interrupts
+ * are still turned off. Here we push in latent entropy, RDSEED, a timestamp,
+ * utsname(), and the command line. Depending on the above configuration knob,
+ * RDSEED may be considered sufficient for initialization. Note that much
+ * earlier setup may already have pushed entropy into the input pool by the
+ * time we get here.
  */
-void __init random_init_early(const char *command_line)
+int __init random_init(const char *command_line)
 {
-	unsigned long entropy[BLAKE2S_BLOCK_SIZE / sizeof(long)];
+	ktime_t now = ktime_get_real();
 	size_t i, longs, arch_bits;
+	unsigned long entropy[BLAKE2S_BLOCK_SIZE / sizeof(long)];
 
 #if defined(LATENT_ENTROPY_PLUGIN)
 	static const u8 compiletime_seed[BLAKE2S_BLOCK_SIZE] __initconst __latent_entropy;
@@ -841,49 +805,34 @@ void __init random_init_early(const char *command_line)
 			i += longs;
 			continue;
 		}
+		entropy[0] = random_get_entropy();
+		_mix_pool_bytes(entropy, sizeof(*entropy));
 		arch_bits -= sizeof(*entropy) * 8;
 		++i;
 	}
-
-	_mix_pool_bytes(init_utsname(), sizeof(*(init_utsname())));
-	_mix_pool_bytes(command_line, strlen(command_line));
-
-	/* Reseed if already seeded by earlier phases. */
-	if (crng_ready())
-		crng_reseed();
-	else if (trust_cpu)
-		_credit_init_bits(arch_bits);
-}
-
-/*
- * This is called a little bit after the prior function, and now there is
- * access to timestamps counters. Interrupts are not yet enabled.
- */
-void __init random_init(void)
-{
-	unsigned long entropy = random_get_entropy();
-	ktime_t now = ktime_get_real();
-
 	_mix_pool_bytes(&now, sizeof(now));
-	_mix_pool_bytes(&entropy, sizeof(entropy));
+	_mix_pool_bytes(utsname(), sizeof(*(utsname())));
+	_mix_pool_bytes(command_line, strlen(command_line));
 	add_latent_entropy();
 
 	/*
-	 * If we were initialized by the cpu or bootloader before jump labels
-	 * are initialized, then we should enable the static branch here, where
+	 * If we were initialized by the bootloader before jump labels are
+	 * initialized, then we should enable the static branch here, where
 	 * it's guaranteed that jump labels have been initialized.
 	 */
 	if (!static_branch_likely(&crng_is_ready) && crng_init >= CRNG_READY)
 		crng_set_ready(NULL);
 
-	/* Reseed if already seeded by earlier phases. */
 	if (crng_ready())
 		crng_reseed();
+	else if (trust_cpu)
+		_credit_init_bits(arch_bits);
 
 	WARN_ON(register_pm_notifier(&pm_notifier));
 
-	WARN(!entropy, "Missing cycle counter and fallback timer; RNG "
-		       "entropy collection will consequently suffer.");
+	WARN(!random_get_entropy(), "Missing cycle counter and fallback timer; RNG "
+				    "entropy collection will consequently suffer.");
+	return 0;
 }
 
 /*
@@ -917,11 +866,11 @@ void add_hwgenerator_randomness(const void *buf, size_t len, size_t entropy)
 	credit_init_bits(entropy);
 
 	/*
-	 * Throttle writing to once every reseed interval, unless we're not yet
-	 * initialized or no entropy is credited.
+	 * Throttle writing to once every CRNG_RESEED_INTERVAL, unless
+	 * we're not yet initialized.
 	 */
-	if (!kthread_should_stop() && (crng_ready() || !entropy))
-		schedule_timeout_interruptible(crng_reseed_interval());
+	if (!kthread_should_stop() && crng_ready())
+		schedule_timeout_interruptible(CRNG_RESEED_INTERVAL);
 }
 EXPORT_SYMBOL_GPL(add_hwgenerator_randomness);
 
@@ -1329,7 +1278,7 @@ SYSCALL_DEFINE3(getrandom, char __user *, ubuf, size_t, len, unsigned int, flags
 			return ret;
 	}
 
-	ret = import_single_range(ITER_DEST, ubuf, len, &iov, &iter);
+	ret = import_single_range(READ, ubuf, len, &iov, &iter);
 	if (unlikely(ret))
 		return ret;
 	return get_random_bytes_user(&iter);
@@ -1447,7 +1396,7 @@ static long random_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 			return -EINVAL;
 		if (get_user(len, p++))
 			return -EFAULT;
-		ret = import_single_range(ITER_SOURCE, p, len, &iov, &iter);
+		ret = import_single_range(WRITE, p, len, &iov, &iter);
 		if (unlikely(ret))
 			return ret;
 		ret = write_pool_user(&iter);

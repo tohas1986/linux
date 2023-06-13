@@ -202,8 +202,6 @@ static int aspeed_adc_set_trim_data(struct iio_dev *indio_dev)
 				((scu_otp) &
 				 (data->model_data->trim_locate->field)) >>
 				__ffs(data->model_data->trim_locate->field);
-			if (!trimming_val)
-				trimming_val = 0x8;
 		}
 		dev_dbg(data->dev,
 			"trimming val = %d, offset = %08x, fields = %08x\n",
@@ -565,9 +563,12 @@ static int aspeed_adc_probe(struct platform_device *pdev)
 	if (ret)
 		return ret;
 
-	ret = aspeed_adc_set_trim_data(indio_dev);
-	if (ret)
-		return ret;
+	if (of_find_property(data->dev->of_node, "aspeed,trim-data-valid",
+			     NULL)) {
+		ret = aspeed_adc_set_trim_data(indio_dev);
+		if (ret)
+			return ret;
+	}
 
 	if (of_find_property(data->dev->of_node, "aspeed,battery-sensing",
 			     NULL)) {
@@ -676,7 +677,6 @@ static const struct aspeed_adc_model_data ast2500_model_data = {
 	.min_sampling_rate = 1,
 	.max_sampling_rate = 1000000,
 	.wait_init_sequence = true,
-	.need_prescaler = true,
 	.scaler_bit_width = 10,
 	.num_channels = 16,
 	.trim_locate = &ast2500_adc_trim,

@@ -1129,16 +1129,26 @@ static void u32_walk(struct tcf_proto *tp, struct tcf_walker *arg,
 	     ht = rtnl_dereference(ht->next)) {
 		if (ht->prio != tp->prio)
 			continue;
-
-		if (!tc_cls_stats_dump(tp, arg, ht))
-			return;
-
+		if (arg->count >= arg->skip) {
+			if (arg->fn(tp, ht, arg) < 0) {
+				arg->stop = 1;
+				return;
+			}
+		}
+		arg->count++;
 		for (h = 0; h <= ht->divisor; h++) {
 			for (n = rtnl_dereference(ht->ht[h]);
 			     n;
 			     n = rtnl_dereference(n->next)) {
-				if (!tc_cls_stats_dump(tp, arg, n))
+				if (arg->count < arg->skip) {
+					arg->count++;
+					continue;
+				}
+				if (arg->fn(tp, n, arg) < 0) {
+					arg->stop = 1;
 					return;
+				}
+				arg->count++;
 			}
 		}
 	}
@@ -1250,7 +1260,12 @@ static void u32_bind_class(void *fh, u32 classid, unsigned long cl, void *q,
 {
 	struct tc_u_knode *n = fh;
 
-	tc_cls_bind_class(classid, cl, q, &n->res, base);
+	if (n && n->res.classid == classid) {
+		if (cl)
+			__tcf_bind_filter(q, &n->res, base);
+		else
+			__tcf_unbind_filter(q, &n->res);
+	}
 }
 
 static int u32_dump(struct net *net, struct tcf_proto *tp, void *fh,

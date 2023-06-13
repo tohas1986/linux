@@ -1586,15 +1586,17 @@ int qlcnic_82xx_napi_add(struct qlcnic_adapter *adapter,
 		sds_ring = &recv_ctx->sds_rings[ring];
 		if (qlcnic_check_multi_tx(adapter) &&
 		    !adapter->ahw->diag_test) {
-			netif_napi_add(netdev, &sds_ring->napi,
-				       qlcnic_rx_poll);
+			netif_napi_add(netdev, &sds_ring->napi, qlcnic_rx_poll,
+				       NAPI_POLL_WEIGHT);
 		} else {
 			if (ring == (adapter->drv_sds_rings - 1))
 				netif_napi_add(netdev, &sds_ring->napi,
-					       qlcnic_poll);
+					       qlcnic_poll,
+					       NAPI_POLL_WEIGHT);
 			else
 				netif_napi_add(netdev, &sds_ring->napi,
-					       qlcnic_rx_poll);
+					       qlcnic_rx_poll,
+					       NAPI_POLL_WEIGHT);
 		}
 	}
 
@@ -2113,14 +2115,17 @@ int qlcnic_83xx_napi_add(struct qlcnic_adapter *adapter,
 		if (adapter->flags & QLCNIC_MSIX_ENABLED) {
 			if (!(adapter->flags & QLCNIC_TX_INTR_SHARED))
 				netif_napi_add(netdev, &sds_ring->napi,
-					       qlcnic_83xx_rx_poll);
+					       qlcnic_83xx_rx_poll,
+					       NAPI_POLL_WEIGHT);
 			else
 				netif_napi_add(netdev, &sds_ring->napi,
-					       qlcnic_83xx_msix_sriov_vf_poll);
+					       qlcnic_83xx_msix_sriov_vf_poll,
+					       NAPI_POLL_WEIGHT);
 
 		} else {
 			netif_napi_add(netdev, &sds_ring->napi,
-				       qlcnic_83xx_poll);
+				       qlcnic_83xx_poll,
+				       NAPI_POLL_WEIGHT);
 		}
 	}
 

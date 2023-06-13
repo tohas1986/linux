@@ -4,6 +4,7 @@
 
 #include <linux/compiler.h>
 #include <linux/rbtree.h>
+#include <pthread.h>
 #include <api/fd/array.h>
 #include <stdio.h>
 

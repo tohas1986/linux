@@ -174,7 +174,6 @@ properties:
       - nvidia,tegra194-carmel
       - qcom,krait
       - qcom,kryo
-      - qcom,kryo240
       - qcom,kryo250
       - qcom,kryo260
       - qcom,kryo280

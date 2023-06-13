@@ -463,10 +463,10 @@ static void can_can_gw_rcv(struct sk_buff *skb, void *data)
 
 	/* process strictly Classic CAN or CAN FD frames */
 	if (gwj->flags & CGW_FLAGS_CAN_FD) {
-		if (!can_is_canfd_skb(skb))
+		if (skb->len != CANFD_MTU)
 			return;
 	} else {
-		if (!can_is_can_skb(skb))
+		if (skb->len != CAN_MTU)
 			return;
 	}
 

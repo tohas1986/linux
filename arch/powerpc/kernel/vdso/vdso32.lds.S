@@ -78,6 +78,7 @@ SECTIONS
 	__end = .;
 	PROVIDE(end = .);
 
+	STABS_DEBUG
 	DWARF_DEBUG
 	ELF_DETAILS
 

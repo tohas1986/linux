@@ -148,7 +148,7 @@ TEST(wait_states)
 
 TEST(wait_nonblock)
 {
-	int pidfd;
+	int pidfd, status = 0;
 	unsigned int flags = 0;
 	pid_t parent_tid = -1;
 	struct clone_args args = {

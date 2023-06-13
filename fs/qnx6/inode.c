@@ -470,8 +470,10 @@ out2:
 out1:
 	iput(sbi->inodes);
 out:
-	brelse(bh1);
-	brelse(bh2);
+	if (bh1)
+		brelse(bh1);
+	if (bh2)
+		brelse(bh2);
 outnobh:
 	kfree(qs);
 	s->s_fs_info = NULL;

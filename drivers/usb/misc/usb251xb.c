@@ -400,7 +400,7 @@ static int usb251xb_get_ofdata(struct usb251xb *hub,
 {
 	struct device *dev = hub->dev;
 	struct device_node *np = dev->of_node;
-	int len;
+	int len, err;
 	u32 property_u32 = 0;
 	const char *cproperty_char;
 	char str[USB251XB_STRING_BUFSIZE / 2];
@@ -416,9 +416,13 @@ static int usb251xb_get_ofdata(struct usb251xb *hub,
 		hub->skip_config = 0;
 
 	hub->gpio_reset = devm_gpiod_get_optional(dev, "reset", GPIOD_OUT_HIGH);
-	if (IS_ERR(hub->gpio_reset))
-		return dev_err_probe(dev, PTR_ERR(hub->gpio_reset),
-				     "unable to request GPIO reset pin\n");
+	if (PTR_ERR(hub->gpio_reset) == -EPROBE_DEFER) {
+		return -EPROBE_DEFER;
+	} else if (IS_ERR(hub->gpio_reset)) {
+		err = PTR_ERR(hub->gpio_reset);
+		dev_err(dev, "unable to request GPIO reset pin (%d)\n", err);
+		return err;
+	}
 
 	if (of_property_read_u16_array(np, "vendor-id", &hub->vendor_id, 1))
 		hub->vendor_id = USB251XB_DEF_VENDOR_ID;
@@ -543,7 +547,7 @@ static int usb251xb_get_ofdata(struct usb251xb *hub,
 		hub->boost_up = USB251XB_DEF_BOOST_UP;
 
 	cproperty_char = of_get_property(np, "manufacturer", NULL);
-	strscpy(str, cproperty_char ? : USB251XB_DEF_MANUFACTURER_STRING,
+	strlcpy(str, cproperty_char ? : USB251XB_DEF_MANUFACTURER_STRING,
 		sizeof(str));
 	hub->manufacturer_len = strlen(str) & 0xFF;
 	memset(hub->manufacturer, 0, USB251XB_STRING_BUFSIZE);
@@ -553,7 +557,7 @@ static int usb251xb_get_ofdata(struct usb251xb *hub,
 			      USB251XB_STRING_BUFSIZE);
 
 	cproperty_char = of_get_property(np, "product", NULL);
-	strscpy(str, cproperty_char ? : data->product_str, sizeof(str));
+	strlcpy(str, cproperty_char ? : data->product_str, sizeof(str));
 	hub->product_len = strlen(str) & 0xFF;
 	memset(hub->product, 0, USB251XB_STRING_BUFSIZE);
 	len = min_t(size_t, USB251XB_STRING_BUFSIZE / 2, strlen(str));
@@ -562,7 +566,7 @@ static int usb251xb_get_ofdata(struct usb251xb *hub,
 			      USB251XB_STRING_BUFSIZE);
 
 	cproperty_char = of_get_property(np, "serial", NULL);
-	strscpy(str, cproperty_char ? : USB251XB_DEF_SERIAL_STRING,
+	strlcpy(str, cproperty_char ? : USB251XB_DEF_SERIAL_STRING,
 		sizeof(str));
 	hub->serial_len = strlen(str) & 0xFF;
 	memset(hub->serial, 0, USB251XB_STRING_BUFSIZE);

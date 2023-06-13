@@ -80,10 +80,6 @@ struct flow_match_pppoe {
 	struct flow_dissector_key_pppoe *key, *mask;
 };
 
-struct flow_match_l2tpv3 {
-	struct flow_dissector_key_l2tpv3 *key, *mask;
-};
-
 struct flow_rule;
 
 void flow_rule_match_meta(const struct flow_rule *rule,
@@ -132,8 +128,6 @@ void flow_rule_match_ct(const struct flow_rule *rule,
 			struct flow_match_ct *out);
 void flow_rule_match_pppoe(const struct flow_rule *rule,
 			   struct flow_match_pppoe *out);
-void flow_rule_match_l2tpv3(const struct flow_rule *rule,
-			    struct flow_match_l2tpv3 *out);
 
 enum flow_action_id {
 	FLOW_ACTION_ACCEPT		= 0,

@@ -155,8 +155,8 @@ _GLOBAL(load_up_vsx)
  * usage of floating-point registers.  These routines must be called
  * with preempt disabled.
  */
-	.data
 #ifdef CONFIG_PPC32
+	.data
 fpzero:
 	.long	0
 fpone:
@@ -169,17 +169,18 @@ fphalf:
 	lfs	fr,name@l(r11)
 #else
 
+	.section ".toc","aw"
 fpzero:
-	.quad	0
+	.tc	FD_0_0[TC],0
 fpone:
-	.quad	0x3ff0000000000000	/* 1.0 */
+	.tc	FD_3ff00000_0[TC],0x3ff0000000000000	/* 1.0 */
 fphalf:
-	.quad	0x3fe0000000000000	/* 0.5 */
+	.tc	FD_3fe00000_0[TC],0x3fe0000000000000	/* 0.5 */
 
-#define LDCONST(fr, name)		\
-	addis	r11,r2,name@toc@ha;	\
-	lfd	fr,name@toc@l(r11)
+#define LDCONST(fr, name)	\
+	lfd	fr,name@toc(r2)
 #endif
+
 	.text
 /*
  * Internal routine to enable floating point and set FPSCR to 0.

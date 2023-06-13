@@ -512,7 +512,7 @@ xfs_readdir(
 {
 	struct xfs_da_args	args = { NULL };
 	unsigned int		lock_mode;
-	bool			isblock;
+	int			isblock;
 	int			error;
 
 	trace_xfs_readdir(dp);

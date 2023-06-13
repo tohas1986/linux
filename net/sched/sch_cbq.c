@@ -230,8 +230,6 @@ cbq_classify(struct sk_buff *skb, struct Qdisc *sch, int *qerr)
 		result = tcf_classify(skb, NULL, fl, &res, true);
 		if (!fl || result < 0)
 			goto fallback;
-		if (result == TC_ACT_SHOT)
-			return NULL;
 
 		cl = (void *)res.class;
 		if (!cl) {
@@ -252,6 +250,8 @@ cbq_classify(struct sk_buff *skb, struct Qdisc *sch, int *qerr)
 		case TC_ACT_TRAP:
 			*qerr = NET_XMIT_SUCCESS | __NET_XMIT_STOLEN;
 			fallthrough;
+		case TC_ACT_SHOT:
+			return NULL;
 		case TC_ACT_RECLASSIFY:
 			return cbq_reclassify(skb, cl);
 		}
@@ -1676,8 +1676,15 @@ static void cbq_walk(struct Qdisc *sch, struct qdisc_walker *arg)
 
 	for (h = 0; h < q->clhash.hashsize; h++) {
 		hlist_for_each_entry(cl, &q->clhash.hash[h], common.hnode) {
-			if (!tc_qdisc_stats_dump(sch, (unsigned long)cl, arg))
+			if (arg->count < arg->skip) {
+				arg->count++;
+				continue;
+			}
+			if (arg->fn(sch, (unsigned long)cl, arg) < 0) {
+				arg->stop = 1;
 				return;
+			}
+			arg->count++;
 		}
 	}
 }

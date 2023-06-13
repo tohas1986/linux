@@ -443,7 +443,7 @@ struct kvmppc_passthru_irqmap {
 };
 #endif
 
-# ifdef CONFIG_PPC_E500
+# ifdef CONFIG_PPC_FSL_BOOK3E
 #define KVMPPC_BOOKE_IAC_NUM	2
 #define KVMPPC_BOOKE_DAC_NUM	2
 # else

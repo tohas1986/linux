@@ -14,7 +14,7 @@
 
 #include "pmbus.h"
 
-enum chips {pfe1100, pfe3000};
+enum chips {dcdc54, pfe1100, pfe3000};
 
 /*
  * Disable status check for pfe3000 devices, because some devices report
@@ -27,6 +27,18 @@ static struct pmbus_platform_data pfe3000_plat_data = {
 };
 
 static struct pmbus_driver_info pfe_driver_info[] = {
+	[dcdc54] = {
+		.pages = 1,
+		.format[PSC_VOLTAGE_IN] = linear,
+		.format[PSC_VOLTAGE_OUT] = linear,
+		.format[PSC_CURRENT_OUT] = linear,
+		.format[PSC_TEMPERATURE] = linear,
+
+		.func[0] = PMBUS_HAVE_VOUT |
+			   PMBUS_HAVE_IOUT |
+			   PMBUS_HAVE_VIN |
+			   PMBUS_HAVE_TEMP,
+	},
 	[pfe1100] = {
 		.pages = 1,
 		.format[PSC_VOLTAGE_IN] = linear,
@@ -100,7 +112,7 @@ static int pfe_pmbus_probe(struct i2c_client *client)
 	 * probe which leads to probe failure (read status word failed).
 	 * So let's set the device to page 0 at the beginning.
 	 */
-	if (model == pfe3000) {
+	if (model == pfe3000 || model == dcdc54) {
 		client->dev.platform_data = &pfe3000_plat_data;
 		i2c_smbus_write_byte_data(client, PMBUS_PAGE, 0);
 	}
@@ -109,6 +121,7 @@ static int pfe_pmbus_probe(struct i2c_client *client)
 }
 
 static const struct i2c_device_id pfe_device_id[] = {
+	{"dcdc54", dcdc54},
 	{"pfe1100", pfe1100},
 	{"pfe3000", pfe3000},
 	{}

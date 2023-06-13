@@ -265,14 +265,14 @@ config SENSORS_AHT10
 	  will be called aht10.
 
 config SENSORS_AQUACOMPUTER_D5NEXT
-	tristate "Aquacomputer D5 Next, Octo, Quadro, Farbwerk, Farbwerk 360, High Flow Next"
+	tristate "Aquacomputer D5 Next, Octo, Quadro, Farbwerk, and Farbwerk 360"
 	depends on USB_HID
 	select CRC16
 	help
 	  If you say yes here you get support for sensors and fans of
 	  the Aquacomputer D5 Next watercooling pump, Octo and Quadro fan
-	  controllers, Farbwerk and Farbwerk 360 RGB controllers, High Flow
-	  Next sensor, where available.
+	  controllers, Farbwerk and Farbwerk 360 RGB controllers, where
+	  available.
 
 	  This driver can also be built as a module. If so, the module
 	  will be called aquacomputer_d5next.
@@ -401,7 +401,6 @@ config SENSORS_ASB100
 
 config SENSORS_ASPEED
 	tristate "ASPEED AST2400/AST2500 PWM and Fan tach driver"
-	depends on ARCH_ASPEED || COMPILE_TEST
 	depends on THERMAL || THERMAL=n
 	select REGMAP
 	help
@@ -411,15 +410,16 @@ config SENSORS_ASPEED
 	  This driver can also be built as a module. If so, the module
 	  will be called aspeed_pwm_tacho.
 
-config SENSORS_ASPEED2600_PWM_TACHO
-    tristate "ASPEED AST2600 PWM and Fan Tachometer"
-    depends on THERMAL || THERMAL=n
-    help
-        This driver provides support for ASPEED AST2600 PWM
-        and Fan Tacho controllers.
+config SENSORS_ASPEED_G6
+	tristate "ASPEED AST2600 PWM and Fan tach driver"
+	depends on THERMAL || THERMAL=n
+	select REGMAP
+	help
+	  This driver provides support for ASPEED AST2600 PWM
+	  and Fan Tacho controllers.
 
-	This driver can also be built as a module. If so, the module
-	will be called aspeed2600-pwm-tacho.
+	  This driver can also be built as a module. If so, the module
+	  will be called aspeed_g6_pwm_tacho.
 
 config SENSORS_ATXP1
 	tristate "Attansic ATXP1 VID controller"
@@ -724,15 +724,6 @@ config SENSORS_GPIO_FAN
 	  This driver can also be built as a module. If so, the module
 	  will be called gpio-fan.
 
-config SENSORS_GXP_FAN_CTRL
-	tristate "HPE GXP fan controller"
-	depends on ARCH_HPE_GXP || COMPILE_TEST
-	help
-	  If you say yes here you get support for GXP fan control functionality.
-
-	  The GXP controls fan function via the CPLD through the use of PWM
-	  registers. This driver reports status and pwm setting of the fans.
-
 config SENSORS_HIH6130
 	tristate "Honeywell Humidicon HIH-6130 humidity/temperature sensor"
 	depends on I2C
@@ -826,7 +817,6 @@ config SENSORS_IT87
 config SENSORS_JC42
 	tristate "JEDEC JC42.4 compliant memory module temperature sensors"
 	depends on I2C
-	select REGMAP_I2C
 	help
 	  If you say yes here, you get support for JEDEC JC42.4 compliant
 	  temperature sensors, which are used on many DDR3 memory modules for
@@ -1094,18 +1084,6 @@ config SENSORS_MAX31730
 
 	  This driver can also be built as a module. If so, the module
 	  will be called max31730.
-
-config SENSORS_MAX31760
-	tristate "MAX31760 fan speed controller"
-	depends on I2C
-	select REGMAP_I2C
-	help
-	  Support for the Analog Devices MAX31760 Precision Fan-Speed
-	  Controller. MAX31760 integrates temperature sensing along with
-	  precision PWM fan control.
-
-	  This driver can also be built as a module. If so, the module
-	  will be called max31760.
 
 config SENSORS_MAX6620
 	tristate "Maxim MAX6620 fan controller"
@@ -1576,6 +1554,17 @@ config SENSORS_NCT7802
 	  This driver can also be built as a module. If so, the module
 	  will be called nct7802.
 
+config SENSORS_NCT7601
+	tristate "Nuvoton NCT7601"
+	depends on I2C
+	select REGMAP_I2C
+	help
+	  If you say yes here you get support for the Nuvoton NCT7601
+	  hardware monitoring chip.
+
+	  This driver can also be built as a module. If so, the module
+	  will be called nct7601.
+
 config SENSORS_NCT7904
 	tristate "Nuvoton NCT7904"
 	depends on I2C && WATCHDOG
@@ -1786,7 +1775,6 @@ config SENSORS_SIS5595
 
 config SENSORS_SY7636A
 	tristate "Silergy SY7636A"
-	depends on MFD_SY7636A
 	help
 	  If you say yes here you get support for the thermistor readout of
 	  the Silergy SY7636A PMIC.
@@ -1826,19 +1814,6 @@ config SENSORS_EMC2103
 
 	  This driver can also be built as a module. If so, the module
 	  will be called emc2103.
-
-config SENSORS_EMC2305
-	tristate "Microchip EMC2305 and compatible EMC2301/2/3"
-	depends on I2C
-	imply THERMAL
-	help
-	  If you say yes here you get support for the Microchip EMC2305
-	  fan controller chips.
-	  The Microchip EMC2305 is a fan controller for up to 5 fans.
-	  Fan rotation speeds are reported in RPM.
-
-	  This driver can also be built as a module.  If so, the module
-	  will be called emc2305.
 
 config SENSORS_EMC6W201
 	tristate "SMSC EMC6W201"
@@ -2395,6 +2370,21 @@ config SENSORS_ASUS_WMI
 
 	  This driver can also be built as a module. If so, the module
 	  will be called asus_wmi_sensors.
+
+config SENSORS_ASUS_WMI_EC
+	tristate "ASUS WMI B550/X570"
+	depends on ACPI_WMI && SENSORS_ASUS_EC=n
+	help
+	  If you say yes here you get support for the ACPI embedded controller
+	  hardware monitoring interface found in B550/X570 ASUS motherboards.
+	  This driver will provide readings of fans, voltages and temperatures
+	  through the system firmware.
+
+	  This driver is deprecated in favor of the ASUS EC Sensors driver
+	  which provides fully compatible output.
+
+	  This driver can also be built as a module. If so, the module
+	  will be called asus_wmi_sensors_ec.
 
 config SENSORS_ASUS_EC
 	tristate "ASUS EC Sensors"

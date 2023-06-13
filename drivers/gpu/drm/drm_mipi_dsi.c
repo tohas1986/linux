@@ -1237,9 +1237,7 @@ static int mipi_dsi_drv_remove(struct device *dev)
 	struct mipi_dsi_driver *drv = to_mipi_dsi_driver(dev->driver);
 	struct mipi_dsi_device *dsi = to_mipi_dsi_device(dev);
 
-	drv->remove(dsi);
-
-	return 0;
+	return drv->remove(dsi);
 }
 
 static void mipi_dsi_drv_shutdown(struct device *dev)

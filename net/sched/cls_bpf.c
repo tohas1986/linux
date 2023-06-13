@@ -635,7 +635,12 @@ static void cls_bpf_bind_class(void *fh, u32 classid, unsigned long cl,
 {
 	struct cls_bpf_prog *prog = fh;
 
-	tc_cls_bind_class(classid, cl, q, &prog->res, base);
+	if (prog && prog->res.classid == classid) {
+		if (cl)
+			__tcf_bind_filter(q, &prog->res, base);
+		else
+			__tcf_unbind_filter(q, &prog->res);
+	}
 }
 
 static void cls_bpf_walk(struct tcf_proto *tp, struct tcf_walker *arg,
@@ -645,8 +650,14 @@ static void cls_bpf_walk(struct tcf_proto *tp, struct tcf_walker *arg,
 	struct cls_bpf_prog *prog;
 
 	list_for_each_entry(prog, &head->plist, link) {
-		if (!tc_cls_stats_dump(tp, arg, prog))
+		if (arg->count < arg->skip)
+			goto skip;
+		if (arg->fn(tp, prog, arg) < 0) {
+			arg->stop = 1;
 			break;
+		}
+skip:
+		arg->count++;
 	}
 }
 

@@ -4,7 +4,7 @@
 $id: http://devicetree.org/schemas/arm/qcom.yaml#
 $schema: http://devicetree.org/meta-schemas/core.yaml#
 
-title: QCOM
+title: QCOM device tree bindings
 
 maintainers:
   - Bjorn Andersson <bjorn.andersson@linaro.org>
@@ -176,9 +176,6 @@ properties:
               - longcheer,l8910
               - samsung,a3u-eur
               - samsung,a5u-eur
-              - samsung,e5
-              - samsung,e7
-              - samsung,grandmax
               - samsung,j5
               - samsung,serranove
               - wingtech,wt88047
@@ -453,7 +450,6 @@ properties:
 
       - description: Google Pazquel with LTE and Parade (newest rev)
         items:
-          - const: google,pazquel-sku6
           - const: google,pazquel-sku4
           - const: qcom,sc7180
 
@@ -554,7 +550,6 @@ properties:
 
       - description: Qualcomm Technologies, Inc. sc7280 CRD platform (newest rev)
         items:
-          - const: google,zoglin
           - const: google,hoglin
           - const: qcom,sc7280
 
@@ -570,29 +565,14 @@ properties:
           - const: google,piglin
           - const: qcom,sc7280
 
-      - description: Google Evoker (newest rev)
-        items:
-          - const: google,evoker
-          - const: qcom,sc7280
-
       - description: Google Herobrine (newest rev)
         items:
           - const: google,herobrine
           - const: qcom,sc7280
 
-      - description: Google Villager (rev0)
-        items:
-          - const: google,villager-rev0
-          - const: qcom,sc7280
-
       - description: Google Villager (newest rev)
         items:
           - const: google,villager
-          - const: qcom,sc7280
-
-      - description: Google Villager with LTE (newest rev)
-        items:
-          - const: google,villager-sku512
           - const: qcom,sc7280
 
       - items:
@@ -736,7 +716,6 @@ properties:
           - enum:
               - qcom,sm8450-hdk
               - qcom,sm8450-qrd
-              - sony,pdx223
           - const: qcom,sm8450
 
 additionalProperties: true

@@ -822,7 +822,8 @@ static int nfs_request_mount(struct fs_context *fc,
 {
 	struct nfs_fs_context *ctx = nfs_fc2context(fc);
 	struct nfs_mount_request request = {
-		.sap		= &ctx->mount_server._address,
+		.sap		= (struct sockaddr *)
+						&ctx->mount_server.address,
 		.dirpath	= ctx->nfs_server.export_path,
 		.protocol	= ctx->mount_server.protocol,
 		.fh		= root_fh,
@@ -853,7 +854,7 @@ static int nfs_request_mount(struct fs_context *fc,
 	 * Construct the mount server's address.
 	 */
 	if (ctx->mount_server.address.sa_family == AF_UNSPEC) {
-		memcpy(request.sap, &ctx->nfs_server._address,
+		memcpy(request.sap, &ctx->nfs_server.address,
 		       ctx->nfs_server.addrlen);
 		ctx->mount_server.addrlen = ctx->nfs_server.addrlen;
 	}

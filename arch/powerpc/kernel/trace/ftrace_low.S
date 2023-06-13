@@ -48,7 +48,7 @@ _GLOBAL(return_to_handler)
 	 * We might be called from a module.
 	 * Switch to our TOC to run inside the core kernel.
 	 */
-	LOAD_PACA_TOC()
+	ld	r2, PACATOC(r13)
 #else
 	stwu	r1, -16(r1)
 	stw	r3, 8(r1)

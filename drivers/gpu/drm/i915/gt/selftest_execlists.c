@@ -2077,7 +2077,7 @@ static int __cancel_active0(struct live_preempt_cancel *arg)
 		goto out;
 	}
 
-	intel_context_ban(rq->context, rq);
+	intel_context_set_banned(rq->context);
 	err = intel_engine_pulse(arg->engine);
 	if (err)
 		goto out;
@@ -2136,7 +2136,7 @@ static int __cancel_active1(struct live_preempt_cancel *arg)
 	if (err)
 		goto out;
 
-	intel_context_ban(rq[1]->context, rq[1]);
+	intel_context_set_banned(rq[1]->context);
 	err = intel_engine_pulse(arg->engine);
 	if (err)
 		goto out;
@@ -2219,7 +2219,7 @@ static int __cancel_queued(struct live_preempt_cancel *arg)
 	if (err)
 		goto out;
 
-	intel_context_ban(rq[2]->context, rq[2]);
+	intel_context_set_banned(rq[2]->context);
 	err = intel_engine_pulse(arg->engine);
 	if (err)
 		goto out;
@@ -2234,13 +2234,7 @@ static int __cancel_queued(struct live_preempt_cancel *arg)
 		goto out;
 	}
 
-	/*
-	 * The behavior between having semaphores and not is different. With
-	 * semaphores the subsequent request is on the hardware and not cancelled
-	 * while without the request is held in the driver and cancelled.
-	 */
-	if (intel_engine_has_semaphores(rq[1]->engine) &&
-	    rq[1]->fence.error != 0) {
+	if (rq[1]->fence.error != 0) {
 		pr_err("Normal inflight1 request did not complete\n");
 		err = -EINVAL;
 		goto out;
@@ -2288,7 +2282,7 @@ static int __cancel_hostile(struct live_preempt_cancel *arg)
 		goto out;
 	}
 
-	intel_context_ban(rq->context, rq);
+	intel_context_set_banned(rq->context);
 	err = intel_engine_pulse(arg->engine); /* force reset */
 	if (err)
 		goto out;

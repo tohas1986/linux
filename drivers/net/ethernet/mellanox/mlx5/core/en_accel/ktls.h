@@ -25,8 +25,7 @@ static inline bool mlx5e_is_ktls_device(struct mlx5_core_dev *mdev)
 	if (!MLX5_CAP_GEN(mdev, log_max_dek))
 		return false;
 
-	return (MLX5_CAP_TLS(mdev, tls_1_2_aes_gcm_128) ||
-		MLX5_CAP_TLS(mdev, tls_1_2_aes_gcm_256));
+	return MLX5_CAP_TLS(mdev, tls_1_2_aes_gcm_128);
 }
 
 static inline bool mlx5e_ktls_type_check(struct mlx5_core_dev *mdev,
@@ -36,10 +35,6 @@ static inline bool mlx5e_ktls_type_check(struct mlx5_core_dev *mdev,
 	case TLS_CIPHER_AES_GCM_128:
 		if (crypto_info->version == TLS_1_2_VERSION)
 			return MLX5_CAP_TLS(mdev,  tls_1_2_aes_gcm_128);
-		break;
-	case TLS_CIPHER_AES_GCM_256:
-		if (crypto_info->version == TLS_1_2_VERSION)
-			return MLX5_CAP_TLS(mdev,  tls_1_2_aes_gcm_256);
 		break;
 	}
 
@@ -61,7 +56,10 @@ static inline bool mlx5e_is_ktls_tx(struct mlx5_core_dev *mdev)
 	return !is_kdump_kernel() && MLX5_CAP_GEN(mdev, tls_tx);
 }
 
-bool mlx5e_is_ktls_rx(struct mlx5_core_dev *mdev);
+static inline bool mlx5e_is_ktls_rx(struct mlx5_core_dev *mdev)
+{
+	return !is_kdump_kernel() && MLX5_CAP_GEN(mdev, tls_rx);
+}
 
 struct mlx5e_tls_sw_stats {
 	atomic64_t tx_tls_ctx;

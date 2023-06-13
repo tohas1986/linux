@@ -207,10 +207,12 @@ static int tsl4531_powerdown(struct i2c_client *client)
 		TSL4531_MODE_POWERDOWN);
 }
 
-static void tsl4531_remove(struct i2c_client *client)
+static int tsl4531_remove(struct i2c_client *client)
 {
 	iio_device_unregister(i2c_get_clientdata(client));
 	tsl4531_powerdown(client);
+
+	return 0;
 }
 
 static int tsl4531_suspend(struct device *dev)

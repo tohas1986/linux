@@ -37,6 +37,7 @@
 #include <linux/vfio.h>
 #include <linux/workqueue.h>
 #include <linux/notifier.h>
+#include <linux/dma-iommu.h>
 #include <linux/irqdomain.h>
 #include "vfio.h"
 
@@ -1856,33 +1857,24 @@ unwind:
  * significantly boosts non-hugetlbfs mappings and doesn't seem to hurt when
  * hugetlbfs is in use.
  */
-static void vfio_test_domain_fgsp(struct vfio_domain *domain, struct list_head *regions)
+static void vfio_test_domain_fgsp(struct vfio_domain *domain)
 {
-	int ret, order = get_order(PAGE_SIZE * 2);
-	struct vfio_iova *region;
 	struct page *pages;
-	dma_addr_t start;
+	int ret, order = get_order(PAGE_SIZE * 2);
 
 	pages = alloc_pages(GFP_KERNEL | __GFP_ZERO, order);
 	if (!pages)
 		return;
 
-	list_for_each_entry(region, regions, list) {
-		start = ALIGN(region->start, PAGE_SIZE * 2);
-		if (start >= region->end || (region->end - start < PAGE_SIZE * 2))
-			continue;
+	ret = iommu_map(domain->domain, 0, page_to_phys(pages), PAGE_SIZE * 2,
+			IOMMU_READ | IOMMU_WRITE | IOMMU_CACHE);
+	if (!ret) {
+		size_t unmapped = iommu_unmap(domain->domain, 0, PAGE_SIZE);
 
-		ret = iommu_map(domain->domain, start, page_to_phys(pages), PAGE_SIZE * 2,
-				IOMMU_READ | IOMMU_WRITE | IOMMU_CACHE);
-		if (!ret) {
-			size_t unmapped = iommu_unmap(domain->domain, start, PAGE_SIZE);
-
-			if (unmapped == PAGE_SIZE)
-				iommu_unmap(domain->domain, start + PAGE_SIZE, PAGE_SIZE);
-			else
-				domain->fgsp = true;
-		}
-		break;
+		if (unmapped == PAGE_SIZE)
+			iommu_unmap(domain->domain, PAGE_SIZE, PAGE_SIZE);
+		else
+			domain->fgsp = true;
 	}
 
 	__free_pages(pages, order);
@@ -2335,7 +2327,7 @@ static int vfio_iommu_type1_attach_group(void *iommu_data,
 		}
 	}
 
-	vfio_test_domain_fgsp(domain, &iova_copy);
+	vfio_test_domain_fgsp(domain);
 
 	/* replay mappings on new domains */
 	ret = vfio_iommu_replay(iommu, domain);

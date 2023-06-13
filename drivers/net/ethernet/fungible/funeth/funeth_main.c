@@ -339,7 +339,8 @@ static int fun_alloc_queue_irqs(struct net_device *dev, unsigned int ntx,
 			return PTR_ERR(irq);
 
 		fp->num_rx_irqs++;
-		netif_napi_add(dev, &irq->napi, fun_rxq_napi_poll);
+		netif_napi_add(dev, &irq->napi, fun_rxq_napi_poll,
+			       NAPI_POLL_WEIGHT);
 	}
 
 	netif_info(fp, intr, dev, "Reserved %u/%u IRQs for Tx/Rx queues\n",
@@ -1801,14 +1802,16 @@ static int fun_create_netdev(struct fun_ethdev *ed, unsigned int portid)
 	if (rc)
 		goto unreg_devlink;
 
-	devlink_port_type_eth_set(&fp->dl_port, netdev);
+	if (fp->dl_port.devlink)
+		devlink_port_type_eth_set(&fp->dl_port, netdev);
 
 	return 0;
 
 unreg_devlink:
 	ed->netdevs[portid] = NULL;
 	fun_ktls_cleanup(fp);
-	devlink_port_unregister(&fp->dl_port);
+	if (fp->dl_port.devlink)
+		devlink_port_unregister(&fp->dl_port);
 free_stats:
 	fun_free_stats_area(fp);
 free_rss:
@@ -1827,9 +1830,11 @@ static void fun_destroy_netdev(struct net_device *netdev)
 	struct funeth_priv *fp;
 
 	fp = netdev_priv(netdev);
-	devlink_port_type_clear(&fp->dl_port);
+	if (fp->dl_port.devlink) {
+		devlink_port_type_clear(&fp->dl_port);
+		devlink_port_unregister(&fp->dl_port);
+	}
 	unregister_netdev(netdev);
-	devlink_port_unregister(&fp->dl_port);
 	fun_ktls_cleanup(fp);
 	fun_free_stats_area(fp);
 	fun_free_rss(fp);

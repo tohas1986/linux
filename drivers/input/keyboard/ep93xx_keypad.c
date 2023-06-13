@@ -23,7 +23,6 @@
 #include <linux/interrupt.h>
 #include <linux/clk.h>
 #include <linux/io.h>
-#include <linux/input.h>
 #include <linux/input/matrix_keypad.h>
 #include <linux/slab.h>
 #include <linux/soc/cirrus/ep93xx.h>

@@ -47,8 +47,7 @@ properties:
       - const: apb
 
   operating-points-v2: true
-  opp-table:
-    type: object
+  opp-table: true
 
 required:
   - reg

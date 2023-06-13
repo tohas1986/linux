@@ -118,6 +118,8 @@ static int mtk_ahci_parse_property(struct ahci_host_priv *hpriv,
 				   SYS_CFG_SATA_EN);
 	}
 
+	of_property_read_u32(np, "ports-implemented", &hpriv->force_port_map);
+
 	return 0;
 }
 

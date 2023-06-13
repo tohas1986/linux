@@ -683,8 +683,14 @@ static void flow_walk(struct tcf_proto *tp, struct tcf_walker *arg,
 	struct flow_filter *f;
 
 	list_for_each_entry(f, &head->filters, list) {
-		if (!tc_cls_stats_dump(tp, arg, f))
+		if (arg->count < arg->skip)
+			goto skip;
+		if (arg->fn(tp, f, arg) < 0) {
+			arg->stop = 1;
 			break;
+		}
+skip:
+		arg->count++;
 	}
 }
 

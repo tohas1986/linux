@@ -11,7 +11,6 @@
 		simple-audio-card,bitclock-master = <&dailink_master>;
 		simple-audio-card,format = "i2s";
 		simple-audio-card,frame-master = <&dailink_master>;
-		simple-audio-card,mclk-fs = <256>;
 		simple-audio-card,name = "imx8mm-nau8822";
 		simple-audio-card,routing =
 			"Headphones", "LHP",

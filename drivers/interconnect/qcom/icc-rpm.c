@@ -563,8 +563,6 @@ int qnoc_remove(struct platform_device *pdev)
 
 	icc_nodes_remove(&qp->provider);
 	clk_bulk_disable_unprepare(qp->num_clks, qp->bus_clks);
-	icc_provider_del(&qp->provider);
-
-	return 0;
+	return icc_provider_del(&qp->provider);
 }
 EXPORT_SYMBOL(qnoc_remove);

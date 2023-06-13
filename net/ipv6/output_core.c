@@ -18,7 +18,7 @@ static u32 __ipv6_select_ident(struct net *net,
 	u32 id;
 
 	do {
-		id = get_random_u32();
+		id = prandom_u32();
 	} while (!id);
 
 	return id;

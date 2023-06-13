@@ -37,8 +37,7 @@ struct plt_entry get_plt_entry(u64 dst, void *pc)
 	return plt;
 }
 
-static bool plt_entries_equal(const struct plt_entry *a,
-			      const struct plt_entry *b)
+bool plt_entries_equal(const struct plt_entry *a, const struct plt_entry *b)
 {
 	u64 p, q;
 

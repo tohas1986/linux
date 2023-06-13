@@ -139,7 +139,6 @@ static inline int pmd_dirty(pmd_t pmd)
 	return pmd_flags(pmd) & _PAGE_DIRTY;
 }
 
-#define pmd_young pmd_young
 static inline int pmd_young(pmd_t pmd)
 {
 	return pmd_flags(pmd) & _PAGE_ACCESSED;
@@ -816,8 +815,7 @@ static inline unsigned long pmd_page_vaddr(pmd_t pmd)
 
 static inline int pmd_bad(pmd_t pmd)
 {
-	return (pmd_flags(pmd) & ~(_PAGE_USER | _PAGE_ACCESSED)) !=
-	       (_KERNPG_TABLE & ~_PAGE_ACCESSED);
+	return (pmd_flags(pmd) & ~_PAGE_USER) != _KERNPG_TABLE;
 }
 
 static inline unsigned long pages_to_mb(unsigned long npg)
@@ -1433,19 +1431,11 @@ static inline bool arch_has_pfn_modify_check(void)
 	return boot_cpu_has_bug(X86_BUG_L1TF);
 }
 
-#define arch_has_hw_pte_young arch_has_hw_pte_young
-static inline bool arch_has_hw_pte_young(void)
+#define arch_faults_on_old_pte arch_faults_on_old_pte
+static inline bool arch_faults_on_old_pte(void)
 {
-	return true;
+	return false;
 }
-
-#ifdef CONFIG_XEN_PV
-#define arch_has_hw_nonleaf_pmd_young arch_has_hw_nonleaf_pmd_young
-static inline bool arch_has_hw_nonleaf_pmd_young(void)
-{
-	return !cpu_feature_enabled(X86_FEATURE_XENPV);
-}
-#endif
 
 #ifdef CONFIG_PAGE_TABLE_CHECK
 static inline bool pte_user_accessible_page(pte_t pte)

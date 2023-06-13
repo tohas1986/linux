@@ -4295,6 +4295,8 @@ out:
 size_t perf_event__fprintf_event_update(union perf_event *event, FILE *fp)
 {
 	struct perf_record_event_update *ev = &event->event_update;
+	struct perf_record_event_update_scale *ev_scale;
+	struct perf_record_event_update_cpus *ev_cpus;
 	struct perf_cpu_map *map;
 	size_t ret;
 
@@ -4302,18 +4304,20 @@ size_t perf_event__fprintf_event_update(union perf_event *event, FILE *fp)
 
 	switch (ev->type) {
 	case PERF_EVENT_UPDATE__SCALE:
-		ret += fprintf(fp, "... scale: %f\n", ev->scale.scale);
+		ev_scale = (struct perf_record_event_update_scale *)ev->data;
+		ret += fprintf(fp, "... scale: %f\n", ev_scale->scale);
 		break;
 	case PERF_EVENT_UPDATE__UNIT:
-		ret += fprintf(fp, "... unit:  %s\n", ev->unit);
+		ret += fprintf(fp, "... unit:  %s\n", ev->data);
 		break;
 	case PERF_EVENT_UPDATE__NAME:
-		ret += fprintf(fp, "... name:  %s\n", ev->name);
+		ret += fprintf(fp, "... name:  %s\n", ev->data);
 		break;
 	case PERF_EVENT_UPDATE__CPUS:
+		ev_cpus = (struct perf_record_event_update_cpus *)ev->data;
 		ret += fprintf(fp, "... ");
 
-		map = cpu_map__new_data(&ev->cpus.cpus);
+		map = cpu_map__new_data(&ev_cpus->cpus);
 		if (map)
 			ret += cpu_map__fprintf(map, fp);
 		else
@@ -4370,6 +4374,8 @@ int perf_event__process_event_update(struct perf_tool *tool __maybe_unused,
 				     struct evlist **pevlist)
 {
 	struct perf_record_event_update *ev = &event->event_update;
+	struct perf_record_event_update_scale *ev_scale;
+	struct perf_record_event_update_cpus *ev_cpus;
 	struct evlist *evlist;
 	struct evsel *evsel;
 	struct perf_cpu_map *map;
@@ -4389,17 +4395,19 @@ int perf_event__process_event_update(struct perf_tool *tool __maybe_unused,
 	switch (ev->type) {
 	case PERF_EVENT_UPDATE__UNIT:
 		free((char *)evsel->unit);
-		evsel->unit = strdup(ev->unit);
+		evsel->unit = strdup(ev->data);
 		break;
 	case PERF_EVENT_UPDATE__NAME:
 		free(evsel->name);
-		evsel->name = strdup(ev->name);
+		evsel->name = strdup(ev->data);
 		break;
 	case PERF_EVENT_UPDATE__SCALE:
-		evsel->scale = ev->scale.scale;
+		ev_scale = (struct perf_record_event_update_scale *)ev->data;
+		evsel->scale = ev_scale->scale;
 		break;
 	case PERF_EVENT_UPDATE__CPUS:
-		map = cpu_map__new_data(&ev->cpus.cpus);
+		ev_cpus = (struct perf_record_event_update_cpus *)ev->data;
+		map = cpu_map__new_data(&ev_cpus->cpus);
 		if (map) {
 			perf_cpu_map__put(evsel->core.own_cpus);
 			evsel->core.own_cpus = map;

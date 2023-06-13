@@ -294,7 +294,7 @@ static int usb_kbd_probe(struct usb_interface *iface,
 	spin_lock_init(&kbd->leds_lock);
 
 	if (dev->manufacturer)
-		strscpy(kbd->name, dev->manufacturer, sizeof(kbd->name));
+		strlcpy(kbd->name, dev->manufacturer, sizeof(kbd->name));
 
 	if (dev->product) {
 		if (dev->manufacturer)

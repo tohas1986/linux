@@ -201,7 +201,7 @@ void __show_regs(struct pt_regs *regs)
 void show_regs(struct pt_regs * regs)
 {
 	__show_regs(regs);
-	dump_backtrace(regs, NULL, KERN_DEFAULT);
+	dump_stack();
 }
 
 ATOMIC_NOTIFIER_HEAD(thread_notify_head);
@@ -230,6 +230,10 @@ void flush_thread(void)
 	flush_tls();
 
 	thread_notify(THREAD_NOTIFY_FLUSH, thread);
+}
+
+void release_thread(struct task_struct *dead_task)
+{
 }
 
 asmlinkage void ret_from_fork(void) __asm__("ret_from_fork");
@@ -371,7 +375,7 @@ static unsigned long sigpage_addr(const struct mm_struct *mm,
 
 	slots = ((last - first) >> PAGE_SHIFT) + 1;
 
-	offset = prandom_u32_max(slots);
+	offset = get_random_int() % slots;
 
 	addr = first + (offset << PAGE_SHIFT);
 

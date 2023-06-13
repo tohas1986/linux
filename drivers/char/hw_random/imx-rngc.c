@@ -292,7 +292,7 @@ static int imx_rngc_probe(struct platform_device *pdev)
 		}
 	}
 
-	ret = devm_hwrng_register(&pdev->dev, &rngc->rng);
+	ret = hwrng_register(&rngc->rng);
 	if (ret) {
 		dev_err(&pdev->dev, "hwrng registration failed\n");
 		return ret;
@@ -302,6 +302,15 @@ static int imx_rngc_probe(struct platform_device *pdev)
 		"Freescale RNG%c registered (HW revision %d.%02d)\n",
 		rng_type == RNGC_TYPE_RNGB ? 'B' : 'C',
 		(ver_id >> RNGC_VER_MAJ_SHIFT) & 0xff, ver_id & 0xff);
+	return 0;
+}
+
+static int __exit imx_rngc_remove(struct platform_device *pdev)
+{
+	struct imx_rngc *rngc = platform_get_drvdata(pdev);
+
+	hwrng_unregister(&rngc->rng);
+
 	return 0;
 }
 
@@ -333,10 +342,11 @@ MODULE_DEVICE_TABLE(of, imx_rngc_dt_ids);
 
 static struct platform_driver imx_rngc_driver = {
 	.driver = {
-		.name = KBUILD_MODNAME,
+		.name = "imx_rngc",
 		.pm = &imx_rngc_pm_ops,
 		.of_match_table = imx_rngc_dt_ids,
 	},
+	.remove = __exit_p(imx_rngc_remove),
 };
 
 module_platform_driver_probe(imx_rngc_driver, imx_rngc_probe);

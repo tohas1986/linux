@@ -22,9 +22,6 @@ GZFLAGS		:=-9
 # Never generate .eh_frame
 KBUILD_CFLAGS	+= $(call cc-option,-fno-dwarf2-cfi-asm)
 
-# Disable FDPIC ABI
-KBUILD_CFLAGS	+= $(call cc-option,-mno-fdpic)
-
 # This should work on most of the modern platforms
 KBUILD_DEFCONFIG := multi_v7_defconfig
 
@@ -137,6 +134,9 @@ KBUILD_AFLAGS	+=$(CFLAGS_ABI) $(AFLAGS_ISA) $(arch-y) $(tune-y) -include asm/uni
 
 CHECKFLAGS	+= -D__arm__
 
+#Default value
+head-y		:= arch/arm/kernel/head$(MMUEXT).o
+
 # Text offset. This list is sorted numerically by address in order to
 # provide a means to avoid/resolve conflicts in multi-arch kernels.
 # Note: the 32kB below this value is reserved for use by the kernel
@@ -224,24 +224,40 @@ machine-$(CONFIG_ARCH_ZYNQ)		+= zynq
 machine-$(CONFIG_PLAT_VERSATILE)	+= versatile
 machine-$(CONFIG_PLAT_SPEAR)		+= spear
 
-# legacy platforms provide their own mach/*.h headers globally,
-# these three are mutually exclusive
-machdirs-$(CONFIG_ARCH_FOOTBRIDGE)	+= arch/arm/mach-footbridge
-machdirs-$(CONFIG_ARCH_RPC)		+= arch/arm/mach-rpc
-machdirs-$(CONFIG_ARCH_SA1100)		+= arch/arm/mach-sa1100
-KBUILD_CPPFLAGS += $(patsubst %,-I$(srctree)/%/include,$(machdirs-y))
+# Platform directory name.  This list is sorted alphanumerically
+# by CONFIG_* macro name.
+plat-$(CONFIG_PLAT_ORION)	+= orion
 
 # The byte offset of the kernel image in RAM from the start of RAM.
 TEXT_OFFSET := $(textofs-y)
 
+# The first directory contains additional information for the boot setup code
+ifneq ($(machine-y),)
+MACHINE  := arch/arm/mach-$(word 1,$(machine-y))/
+else
+MACHINE  :=
+endif
+ifeq ($(CONFIG_ARCH_MULTIPLATFORM),y)
+MACHINE  :=
+endif
+
+machdirs := $(patsubst %,arch/arm/mach-%/,$(machine-y))
+platdirs := $(patsubst %,arch/arm/plat-%/,$(sort $(plat-y)))
+
+ifneq ($(CONFIG_ARCH_MULTIPLATFORM),y)
+ifneq ($(CONFIG_ARM_SINGLE_ARMV7M),y)
+KBUILD_CPPFLAGS += $(patsubst %,-I$(srctree)/%include,$(machdirs) $(platdirs))
+endif
+endif
+
 export	TEXT_OFFSET GZFLAGS MMUEXT
 
 # If we have a machine-specific directory, then include it in the build.
-core-y				+= $(patsubst %,arch/arm/mach-%/,$(machine-y))
-# For cleaning
-core-				+= $(patsubst %,arch/arm/mach-%/,$(machine-))
+core-y				+= $(machdirs) $(platdirs)
 
-core-$(CONFIG_PLAT_ORION)	+= arch/arm/plat-orion/
+# For cleaning
+core-				+= $(patsubst %,arch/arm/mach-%/, $(machine-))
+core-				+= $(patsubst %,arch/arm/plat-%/, $(plat-))
 
 libs-y				:= arch/arm/lib/ $(libs-y)
 
@@ -294,7 +310,7 @@ bootpImage uImage: zImage
 zImage: Image
 
 $(BOOT_TARGETS): vmlinux
-	$(Q)$(MAKE) $(build)=$(boot) $(boot)/$@
+	$(Q)$(MAKE) $(build)=$(boot) MACHINE=$(MACHINE) $(boot)/$@
 	@$(kecho) '  Kernel: $(boot)/$@ is ready'
 
 $(INSTALL_TARGETS): KBUILD_IMAGE = $(boot)/$(patsubst %install,%Image,$@)
@@ -308,7 +324,7 @@ ifeq ($(CONFIG_VDSO),y)
 endif
 
 # My testing targets (bypasses dependencies)
-bp:;	$(Q)$(MAKE) $(build)=$(boot) $(boot)/bootpImage
+bp:;	$(Q)$(MAKE) $(build)=$(boot) MACHINE=$(MACHINE) $(boot)/bootpImage
 
 
 define archhelp

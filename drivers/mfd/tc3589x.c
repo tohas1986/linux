@@ -429,11 +429,13 @@ static int tc3589x_probe(struct i2c_client *i2c,
 	return 0;
 }
 
-static void tc3589x_remove(struct i2c_client *client)
+static int tc3589x_remove(struct i2c_client *client)
 {
 	struct tc3589x *tc3589x = i2c_get_clientdata(client);
 
 	mfd_remove_devices(tc3589x->dev);
+
+	return 0;
 }
 
 #ifdef CONFIG_PM_SLEEP

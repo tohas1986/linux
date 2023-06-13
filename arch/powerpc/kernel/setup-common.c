@@ -18,7 +18,6 @@
 #include <linux/delay.h>
 #include <linux/initrd.h>
 #include <linux/platform_device.h>
-#include <linux/printk.h>
 #include <linux/seq_file.h>
 #include <linux/ioport.h>
 #include <linux/console.h>
@@ -26,7 +25,6 @@
 #include <linux/root_dev.h>
 #include <linux/cpu.h>
 #include <linux/unistd.h>
-#include <linux/seq_buf.h>
 #include <linux/serial.h>
 #include <linux/serial_8250.h>
 #include <linux/percpu.h>
@@ -590,15 +588,6 @@ static __init int add_pcspkr(void)
 device_initcall(add_pcspkr);
 #endif	/* CONFIG_PCSPKR_PLATFORM */
 
-static char ppc_hw_desc_buf[128] __initdata;
-
-struct seq_buf ppc_hw_desc __initdata = {
-	.buffer = ppc_hw_desc_buf,
-	.size = sizeof(ppc_hw_desc_buf),
-	.len = 0,
-	.readpos = 0,
-};
-
 static __init void probe_machine(void)
 {
 	extern struct machdep_calls __machine_desc_start;
@@ -639,13 +628,7 @@ static __init void probe_machine(void)
 		for (;;);
 	}
 
-	// Append the machine name to other info we've gathered
-	seq_buf_puts(&ppc_hw_desc, ppc_md.name);
-
-	// Set the generic hardware description shown in oopses
-	dump_stack_set_arch_desc(ppc_hw_desc.buffer);
-
-	pr_info("Hardware name: %s\n", ppc_hw_desc.buffer);
+	printk(KERN_INFO "Using %s machine description\n", ppc_md.name);
 }
 
 /* Match a class of boards, not a specific device configuration. */

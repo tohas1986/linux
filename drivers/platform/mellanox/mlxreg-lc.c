@@ -564,8 +564,10 @@ static int mlxreg_lc_event_handler(void *handle, enum mlxreg_hotplug_kind kind, 
 		 mlxreg_lc->data->slot, mlxreg_lc->state, kind, action);
 
 	mutex_lock(&mlxreg_lc->lock);
-	if (!(mlxreg_lc->state & MLXREG_LC_INITIALIZED))
-		goto mlxreg_lc_non_initialzed_exit;
+	if (!(mlxreg_lc->state & MLXREG_LC_INITIALIZED)) {
+		mutex_unlock(&mlxreg_lc->lock);
+		return 0;
+	}
 
 	switch (kind) {
 	case MLXREG_HOTPLUG_LC_SYNCED:
@@ -592,8 +594,8 @@ static int mlxreg_lc_event_handler(void *handle, enum mlxreg_hotplug_kind kind, 
 				/* In case line card is configured - enable it. */
 				if (mlxreg_lc->state & MLXREG_LC_CONFIGURED)
 					err = mlxreg_lc_enable_disable(mlxreg_lc, 1);
-
-				goto mlxreg_lc_enable_disable_exit;
+				mutex_unlock(&mlxreg_lc->lock);
+				return err;
 			}
 			err = mlxreg_lc_create_static_devices(mlxreg_lc, mlxreg_lc->main_devs,
 							      mlxreg_lc->main_devs_num);
@@ -625,10 +627,8 @@ static int mlxreg_lc_event_handler(void *handle, enum mlxreg_hotplug_kind kind, 
 		break;
 	}
 
-mlxreg_lc_enable_disable_exit:
 mlxreg_lc_power_on_off_fail:
 mlxreg_lc_create_static_devices_fail:
-mlxreg_lc_non_initialzed_exit:
 	mutex_unlock(&mlxreg_lc->lock);
 
 	return err;

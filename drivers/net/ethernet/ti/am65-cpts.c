@@ -943,7 +943,9 @@ struct am65_cpts *am65_cpts_create(struct device *dev, void __iomem *regs,
 	cpts->irq = of_irq_get_byname(node, "cpts");
 	if (cpts->irq <= 0) {
 		ret = cpts->irq ?: -ENXIO;
-		dev_err_probe(dev, ret, "Failed to get IRQ number\n");
+		if (ret != -EPROBE_DEFER)
+			dev_err(dev, "Failed to get IRQ number (err = %d)\n",
+				ret);
 		return ERR_PTR(ret);
 	}
 
@@ -963,7 +965,8 @@ struct am65_cpts *am65_cpts_create(struct device *dev, void __iomem *regs,
 	cpts->refclk = devm_get_clk_from_child(dev, node, "cpts");
 	if (IS_ERR(cpts->refclk)) {
 		ret = PTR_ERR(cpts->refclk);
-		dev_err_probe(dev, ret, "Failed to get refclk\n");
+		if (ret != -EPROBE_DEFER)
+			dev_err(dev, "Failed to get refclk %d\n", ret);
 		return ERR_PTR(ret);
 	}
 

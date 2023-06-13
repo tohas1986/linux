@@ -47,8 +47,7 @@ properties:
     maxItems: 1
 
   operating-points-v2: true
-  opp-table:
-    type: object
+  opp-table: true
 
   fsl,ddrc:
     $ref: "/schemas/types.yaml#/definitions/phandle"

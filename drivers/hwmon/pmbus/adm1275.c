@@ -531,7 +531,7 @@ static int adm1275_probe(struct i2c_client *client)
 
 	if (of_property_read_u32(client->dev.of_node,
 				 "shunt-resistor-micro-ohms", &shunt))
-		shunt = 1000; /* 1 mOhm if not set via DT */
+		shunt = 500; /* 0.5 mOhm if not set via DT */
 
 	if (shunt == 0)
 		return -EINVAL;

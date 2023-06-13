@@ -910,9 +910,10 @@ exit:
 	return err;
 }
 
-static void rs5c372_remove(struct i2c_client *client)
+static int rs5c372_remove(struct i2c_client *client)
 {
 	rs5c_sysfs_unregister(&client->dev);
+	return 0;
 }
 
 static struct i2c_driver rs5c372_driver = {

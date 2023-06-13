@@ -111,6 +111,7 @@ struct lm75_data {
 	unsigned int			sample_time;	/* In ms */
 	enum lm75_type			kind;
 	const struct lm75_params	*params;
+	bool	is_initialized;
 };
 
 /*-----------------------------------------------------------------------*/
@@ -327,6 +328,7 @@ static int lm75_write_config(struct lm75_data *data, u8 set_mask,
 	value = data->current_conf & ~clr_mask;
 	value |= set_mask;
 
+	data->is_initialized = false;
 	if (data->current_conf != value) {
 		s32 err;
 
@@ -336,6 +338,7 @@ static int lm75_write_config(struct lm75_data *data, u8 set_mask,
 			return err;
 		data->current_conf = value;
 	}
+	data->is_initialized = true;
 	return 0;
 }
 
@@ -344,7 +347,11 @@ static int lm75_read(struct device *dev, enum hwmon_sensor_types type,
 {
 	struct lm75_data *data = dev_get_drvdata(dev);
 	unsigned int regval;
-	int err, reg;
+	int err, reg, rc;
+
+	if (! data->is_initialized)
+		rc = lm75_write_config(data, data->params->set_mask,
+				data->params->clr_mask);
 
 	switch (type) {
 	case hwmon_chip:
@@ -386,7 +393,11 @@ static int lm75_write_temp(struct device *dev, u32 attr, long temp)
 {
 	struct lm75_data *data = dev_get_drvdata(dev);
 	u8 resolution;
-	int reg;
+	int reg, rc;
+
+	if (! data->is_initialized)
+		rc = lm75_write_config(data, data->params->set_mask,
+				data->params->clr_mask);
 
 	switch (attr) {
 	case hwmon_temp_max:
@@ -421,6 +432,11 @@ static int lm75_update_interval(struct device *dev, long val)
 	unsigned int reg;
 	u8 index;
 	s32 err;
+	int rc;
+
+	if (! data->is_initialized)
+		rc = lm75_write_config(data, data->params->set_mask,
+				data->params->clr_mask);
 
 	index = find_closest(val, data->params->sample_times,
 			     (int)data->params->num_sample_times);
@@ -626,16 +642,14 @@ static int lm75_probe(struct i2c_client *client)
 	/* Cache original configuration */
 	status = i2c_smbus_read_byte_data(client, LM75_REG_CONF);
 	if (status < 0) {
-		dev_dbg(dev, "Can't read config? %d\n", status);
-		return status;
+		dev_info(dev, "Unable to read status, instantiating anyway\n");
+		status = 0x60;
 	}
 	data->orig_conf = status;
 	data->current_conf = status;
 
 	err = lm75_write_config(data, data->params->set_mask,
 				data->params->clr_mask);
-	if (err)
-		return err;
 
 	err = devm_add_action_or_reset(dev, lm75_remove, data);
 	if (err)
@@ -893,7 +907,7 @@ static int lm75_detect(struct i2c_client *new_client,
 			return -ENODEV;
 	}
 
-	strscpy(info->type, is_lm75a ? "lm75a" : "lm75", I2C_NAME_SIZE);
+	strlcpy(info->type, is_lm75a ? "lm75a" : "lm75", I2C_NAME_SIZE);
 
 	return 0;
 }

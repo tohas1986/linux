@@ -134,7 +134,6 @@ properties:
 
   ams-pl@400:
     type: object
-    additionalProperties: false
     description:
       PL-SYSMON is capable of monitoring off chip voltage and temperature.
       PL-SYSMON block has DRP, JTAG and I2C interface to enable monitoring

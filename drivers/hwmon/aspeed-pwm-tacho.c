@@ -547,7 +547,7 @@ static int aspeed_get_fan_tach_ch_rpm(struct aspeed_pwm_tacho_data *priv,
 
 	/* return -ETIMEDOUT if we didn't get an answer. */
 	if (ret)
-		return ret;
+		return 0;
 
 	raw_data = val & RESULT_VALUE_MASK;
 	tach_div = priv->type_fan_tach_clock_division[type];

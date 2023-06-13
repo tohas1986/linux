@@ -29,9 +29,6 @@ enum iter_type {
 	ITER_UBUF,
 };
 
-#define ITER_SOURCE	1	// == WRITE
-#define ITER_DEST	0	// == READ
-
 struct iov_iter_state {
 	size_t iov_offset;
 	size_t count;
@@ -301,7 +298,7 @@ iov_iter_npages_cap(struct iov_iter *i, int maxpages, size_t max_bytes)
 		shorted = iov_iter_count(i) - max_bytes;
 		iov_iter_truncate(i, max_bytes);
 	}
-	npages = iov_iter_npages(i, maxpages);
+	npages = iov_iter_npages(i, INT_MAX);
 	if (shorted)
 		iov_iter_reexpand(i, iov_iter_count(i) + shorted);
 

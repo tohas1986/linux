@@ -1,0 +1,22 @@
+Nuvoton NCT7601 Hardware Monitoring IC
+
+Required node properties:
+
+ - "compatible": must be "nuvoton,nct7601"
+ - "reg": I2C bus address of the device
+ - #address-cells = <1>;
+ - #size-cells = <0>;
+
+Optional properties:
+ - "sensor-diode": sets 6 differential inputs
+   instead of default 8 thermistor inputs
+ 
+Example nct7601 node:
+
+nct7601-example@28 {
+	compatible = "nuvoton,nct7601";
+	reg = <0x28>;
+	#address-cells = <1>;
+	#size-cells = <0>;
+    sensor-diode;
+};

@@ -222,20 +222,21 @@ static int sparx5_inject(struct sparx5 *sparx5,
 	return NETDEV_TX_OK;
 }
 
-netdev_tx_t sparx5_port_xmit_impl(struct sk_buff *skb, struct net_device *dev)
+int sparx5_port_xmit_impl(struct sk_buff *skb, struct net_device *dev)
 {
 	struct net_device_stats *stats = &dev->stats;
 	struct sparx5_port *port = netdev_priv(dev);
 	struct sparx5 *sparx5 = port->sparx5;
 	u32 ifh[IFH_LEN];
-	netdev_tx_t ret;
+	int ret;
 
 	memset(ifh, 0, IFH_LEN * 4);
 	sparx5_set_port_ifh(ifh, port->portno);
 
 	if (sparx5->ptp && skb_shinfo(skb)->tx_flags & SKBTX_HW_TSTAMP) {
-		if (sparx5_ptp_txtstamp_request(port, skb) < 0)
-			return NETDEV_TX_BUSY;
+		ret = sparx5_ptp_txtstamp_request(port, skb);
+		if (ret)
+			return ret;
 
 		sparx5_set_port_ifh_rew_op(ifh, SPARX5_SKB_CB(skb)->rew_op);
 		sparx5_set_port_ifh_pdu_type(ifh, SPARX5_SKB_CB(skb)->pdu_type);
@@ -249,31 +250,23 @@ netdev_tx_t sparx5_port_xmit_impl(struct sk_buff *skb, struct net_device *dev)
 	else
 		ret = sparx5_inject(sparx5, ifh, skb, dev);
 
-	if (ret == -EBUSY)
-		goto busy;
-	if (ret < 0)
-		goto drop;
+	if (ret == NETDEV_TX_OK) {
+		stats->tx_bytes += skb->len;
+		stats->tx_packets++;
 
-	stats->tx_bytes += skb->len;
-	stats->tx_packets++;
-	sparx5->tx.packets++;
+		if (skb_shinfo(skb)->tx_flags & SKBTX_HW_TSTAMP &&
+		    SPARX5_SKB_CB(skb)->rew_op == IFH_REW_OP_TWO_STEP_PTP)
+			return ret;
 
-	if (skb_shinfo(skb)->tx_flags & SKBTX_HW_TSTAMP &&
-	    SPARX5_SKB_CB(skb)->rew_op == IFH_REW_OP_TWO_STEP_PTP)
-		return NETDEV_TX_OK;
+		dev_kfree_skb_any(skb);
+	} else {
+		stats->tx_dropped++;
 
-	dev_consume_skb_any(skb);
-	return NETDEV_TX_OK;
-drop:
-	stats->tx_dropped++;
-	sparx5->tx.dropped++;
-	dev_kfree_skb_any(skb);
-	return NETDEV_TX_OK;
-busy:
-	if (skb_shinfo(skb)->tx_flags & SKBTX_HW_TSTAMP &&
-	    SPARX5_SKB_CB(skb)->rew_op == IFH_REW_OP_TWO_STEP_PTP)
-		sparx5_ptp_txtstamp_release(port, skb);
-	return NETDEV_TX_BUSY;
+		if (skb_shinfo(skb)->tx_flags & SKBTX_HW_TSTAMP &&
+		    SPARX5_SKB_CB(skb)->rew_op == IFH_REW_OP_TWO_STEP_PTP)
+			sparx5_ptp_txtstamp_release(port, skb);
+	}
+	return ret;
 }
 
 static enum hrtimer_restart sparx5_injection_timeout(struct hrtimer *tmr)

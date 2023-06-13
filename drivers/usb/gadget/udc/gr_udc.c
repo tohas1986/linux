@@ -1906,6 +1906,7 @@ static int gr_udc_start(struct usb_gadget *gadget,
 	spin_lock(&dev->lock);
 
 	/* Hook up the driver */
+	driver->driver.bus = NULL;
 	dev->driver = driver;
 
 	/* Get ready for host detection */

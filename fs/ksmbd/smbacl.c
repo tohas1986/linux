@@ -275,8 +275,7 @@ static int sid_to_id(struct user_namespace *user_ns,
 		uid_t id;
 
 		id = le32_to_cpu(psid->sub_auth[psid->num_subauth - 1]);
-		uid = KUIDT_INIT(id);
-		uid = from_vfsuid(user_ns, &init_user_ns, VFSUIDT_INIT(uid));
+		uid = mapped_kuid_user(user_ns, &init_user_ns, KUIDT_INIT(id));
 		if (uid_valid(uid)) {
 			fattr->cf_uid = uid;
 			rc = 0;
@@ -286,8 +285,7 @@ static int sid_to_id(struct user_namespace *user_ns,
 		gid_t id;
 
 		id = le32_to_cpu(psid->sub_auth[psid->num_subauth - 1]);
-		gid = KGIDT_INIT(id);
-		gid = from_vfsgid(user_ns, &init_user_ns, VFSGIDT_INIT(gid));
+		gid = mapped_kgid_user(user_ns, &init_user_ns, KGIDT_INIT(id));
 		if (gid_valid(gid)) {
 			fattr->cf_gid = gid;
 			rc = 0;
@@ -993,7 +991,7 @@ static void smb_set_ace(struct smb_ace *ace, const struct smb_sid *sid, u8 type,
 }
 
 int smb_inherit_dacl(struct ksmbd_conn *conn,
-		     const struct path *path,
+		     struct path *path,
 		     unsigned int uid, unsigned int gid)
 {
 	const struct smb_sid *psid, *creator = NULL;
@@ -1187,7 +1185,7 @@ bool smb_inherit_flags(int flags, bool is_dir)
 	return false;
 }
 
-int smb_check_perm_dacl(struct ksmbd_conn *conn, const struct path *path,
+int smb_check_perm_dacl(struct ksmbd_conn *conn, struct path *path,
 			__le32 *pdaccess, int uid)
 {
 	struct user_namespace *user_ns = mnt_user_ns(path->mnt);
@@ -1354,7 +1352,7 @@ err_out:
 }
 
 int set_info_sec(struct ksmbd_conn *conn, struct ksmbd_tree_connect *tcon,
-		 const struct path *path, struct smb_ntsd *pntsd, int ntsd_len,
+		 struct path *path, struct smb_ntsd *pntsd, int ntsd_len,
 		 bool type_check)
 {
 	int rc;

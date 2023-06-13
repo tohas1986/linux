@@ -17,7 +17,7 @@
 #include <linux/of_device.h>
 #include "pmbus.h"
 
-enum chips { lm25056, lm25066, lm5064, lm5066, lm5066i };
+enum chips { lm25056, lm25066, lm5064, lm5066, lm5066i, lm5066i05, lm5066i2 };
 
 #define LM25066_READ_VAUX		0xd0
 #define LM25066_MFR_READ_IIN		0xd1
@@ -225,6 +225,76 @@ static const struct __coeff lm25066_coeff[][PSC_NUM_CLASSES + 2] = {
 			.m = 16,
 		},
 	},
+	[lm5066i05] = {
+		[PSC_VOLTAGE_IN] = {
+			.m = 4617,
+			.b = -140,
+			.R = -2,
+		},
+		[PSC_VOLTAGE_OUT] = {
+			.m = 4602,
+			.b = 500,
+			.R = -2,
+		},
+		[PSC_CURRENT_IN] = {
+			.m = 7538,
+			.b = -504,
+			.R = -2,
+		},
+		[PSC_CURRENT_IN_L] = {
+			.m = 3823,
+			.b = 100,
+			.R = -2,
+		},
+		[PSC_POWER] = {
+			.m = 851,
+			.b = -4000,
+			.R = -3,
+		},
+		[PSC_POWER_L] = {
+			.m = 430,
+			.b = -965,
+			.R = -3,
+		},
+		[PSC_TEMPERATURE] = {
+			.m = 16,
+		},
+	},
+	[lm5066i2] = {
+		[PSC_VOLTAGE_IN] = {
+			.m = 4617,
+			.b = -140,
+			.R = -2,
+		},
+		[PSC_VOLTAGE_OUT] = {
+			.m = 4602,
+			.b = 500,
+			.R = -2,
+		},
+		[PSC_CURRENT_IN] = {
+			.m = 30152,
+			.b = -504,
+			.R = -2,
+		},
+		[PSC_CURRENT_IN_L] = {
+			.m = 15290,
+			.b = 100,
+			.R = -2,
+		},
+		[PSC_POWER] = {
+			.m = 3402,
+			.b = -4000,
+			.R = -3,
+		},
+		[PSC_POWER_L] = {
+			.m = 1722,
+			.b = -965,
+			.R = -3,
+		},
+		[PSC_TEMPERATURE] = {
+			.m = 16,
+		},
+	},
 };
 
 struct lm25066_data {
@@ -263,6 +333,8 @@ static int lm25066_read_word_data(struct i2c_client *client, int page,
 			break;
 		case lm5066:
 		case lm5066i:
+		case lm5066i05:
+		case lm5066i2:
 			/* VIN: 2.18 mV VAUX: 725 uV LSB */
 			ret = DIV_ROUND_CLOSEST(ret * 725, 2180);
 			break;
@@ -447,6 +519,8 @@ static const struct i2c_device_id lm25066_id[] = {
 	{"lm5064", lm5064},
 	{"lm5066", lm5066},
 	{"lm5066i", lm5066i},
+	{"lm5066i05", lm5066i05},
+	{"lm5066i2", lm5066i2},
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, lm25066_id);

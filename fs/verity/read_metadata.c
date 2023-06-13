@@ -53,14 +53,14 @@ static int fsverity_read_merkle_tree(struct inode *inode,
 			break;
 		}
 
-		virt = kmap_local_page(page);
+		virt = kmap(page);
 		if (copy_to_user(buf, virt + offs_in_page, bytes_to_copy)) {
-			kunmap_local(virt);
+			kunmap(page);
 			put_page(page);
 			err = -EFAULT;
 			break;
 		}
-		kunmap_local(virt);
+		kunmap(page);
 		put_page(page);
 
 		retval += bytes_to_copy;

@@ -9,6 +9,9 @@
  *      v3.2 - Added sysfs support
  */
 
+/*
+ */
+
 #include <linux/kernel.h>
 #include <linux/slab.h>
 #include <linux/module.h>
@@ -152,7 +155,7 @@ static int usb_acecad_probe(struct usb_interface *intf, const struct usb_device_
 	acecad->input = input_dev;
 
 	if (dev->manufacturer)
-		strscpy(acecad->name, dev->manufacturer, sizeof(acecad->name));
+		strlcpy(acecad->name, dev->manufacturer, sizeof(acecad->name));
 
 	if (dev->product) {
 		if (dev->manufacturer)

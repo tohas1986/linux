@@ -13,7 +13,6 @@
 #include <linux/skbuff.h>
 #include <linux/slab.h>
 #include <linux/types.h>
-#include <linux/uaccess.h>
 #include <linux/termios.h>
 #include <linux/wwan.h>
 #include <net/rtnetlink.h>

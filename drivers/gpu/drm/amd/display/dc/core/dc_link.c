@@ -832,9 +832,8 @@ static bool discover_dp_mst_topology(struct dc_link *link, enum dc_detect_reason
 	LINK_INFO("link=%d, mst branch is now Connected\n",
 		  link->link_index);
 
-	link->type = dc_connection_mst_branch;
 	apply_dpia_mst_dsc_always_on_wa(link);
-
+	link->type = dc_connection_mst_branch;
 	dm_helpers_dp_update_branch_info(link->ctx, link);
 	if (dm_helpers_dp_mst_start_top_mgr(link->ctx,
 			link, (reason == DETECT_REASON_BOOT || reason == DETECT_REASON_RESUMEFROMS3S4))) {
@@ -848,13 +847,20 @@ static bool discover_dp_mst_topology(struct dc_link *link, enum dc_detect_reason
 
 bool reset_cur_dp_mst_topology(struct dc_link *link)
 {
+	bool result = false;
 	DC_LOGGER_INIT(link->ctx->logger);
 
 	LINK_INFO("link=%d, mst branch is now Disconnected\n",
 		  link->link_index);
 
 	revert_dpia_mst_dsc_always_on_wa(link);
-	return dm_helpers_dp_mst_stop_top_mgr(link->ctx, link);
+	result = dm_helpers_dp_mst_stop_top_mgr(link->ctx, link);
+
+	link->mst_stream_alloc_table.stream_count = 0;
+	memset(link->mst_stream_alloc_table.stream_allocations,
+			0,
+			sizeof(link->mst_stream_alloc_table.stream_allocations));
+	return result;
 }
 
 static bool should_prepare_phy_clocks_for_link_verification(const struct dc *dc,
@@ -1305,17 +1311,6 @@ static bool detect_link_and_local_sink(struct dc_link *link,
 				sink->edid_caps.audio_modes[i].sample_rate,
 				sink->edid_caps.audio_modes[i].sample_size);
 		}
-
-		if (link->connector_signal == SIGNAL_TYPE_EDP) {
-			/* Init dc_panel_config by HW config */
-			if (dc_ctx->dc->res_pool->funcs->get_panel_config_defaults)
-				dc_ctx->dc->res_pool->funcs->get_panel_config_defaults(&link->panel_config);
-			/* Pickup base DM settings */
-			dm_helpers_init_panel_settings(dc_ctx, &link->panel_config, sink);
-			// Override dc_panel_config if system has specific settings
-			dm_helpers_override_panel_settings(dc_ctx, &link->panel_config);
-		}
-
 	} else {
 		/* From Connected-to-Disconnected. */
 		link->type = dc_connection_none;
@@ -1980,7 +1975,7 @@ static enum dc_status enable_link_dp(struct dc_state *state,
 	int i;
 	bool apply_seamless_boot_optimization = false;
 	uint32_t bl_oled_enable_delay = 50; // in ms
-	uint32_t post_oui_delay = 30; // 30ms
+	const uint32_t post_oui_delay = 30; // 30ms
 	/* Reduce link bandwidth between failed link training attempts. */
 	bool do_fallback = false;
 
@@ -2027,10 +2022,8 @@ static enum dc_status enable_link_dp(struct dc_state *state,
 
 	// during mode switch we do DP_SET_POWER off then on, and OUI is lost
 	dpcd_set_source_specific_data(link);
-	if (link->dpcd_sink_ext_caps.raw != 0) {
-		post_oui_delay += link->panel_config.pps.extra_post_OUI_ms;
+	if (link->dpcd_sink_ext_caps.raw != 0)
 		msleep(post_oui_delay);
-	}
 
 	// similarly, mode switch can cause loss of cable ID
 	dpcd_write_cable_id_to_dprx(link);
@@ -2076,7 +2069,11 @@ static enum dc_status enable_link_edp(
 		struct dc_state *state,
 		struct pipe_ctx *pipe_ctx)
 {
-	return enable_link_dp(state, pipe_ctx);
+	enum dc_status status;
+
+	status = enable_link_dp(state, pipe_ctx);
+
+	return status;
 }
 
 static enum dc_status enable_link_dp_mst(
@@ -2642,8 +2639,9 @@ static void disable_link(struct dc_link *link, const struct link_resource *link_
 				dp_set_fec_ready(link, link_res, false);
 			}
 		}
-	} else if (signal != SIGNAL_TYPE_VIRTUAL) {
-		link->dc->hwss.disable_link_output(link, link_res, signal);
+	} else {
+		if (signal != SIGNAL_TYPE_VIRTUAL)
+			link->link_enc->funcs->disable_output(link->link_enc, signal);
 	}
 
 	if (signal == SIGNAL_TYPE_DISPLAY_PORT_MST) {
@@ -2665,7 +2663,6 @@ static void enable_link_hdmi(struct pipe_ctx *pipe_ctx)
 	bool is_over_340mhz = false;
 	bool is_vga_mode = (stream->timing.h_addressable == 640)
 			&& (stream->timing.v_addressable == 480);
-	struct dc *dc = pipe_ctx->stream->ctx->dc;
 
 	if (stream->phy_pix_clk == 0)
 		stream->phy_pix_clk = stream->timing.pix_clk_100hz / 10;
@@ -2705,12 +2702,11 @@ static void enable_link_hdmi(struct pipe_ctx *pipe_ctx)
 	if (stream->timing.pixel_encoding == PIXEL_ENCODING_YCBCR422)
 		display_color_depth = COLOR_DEPTH_888;
 
-	dc->hwss.enable_tmds_link_output(
-			link,
-			&pipe_ctx->link_res,
-			pipe_ctx->stream->signal,
+	link->link_enc->funcs->enable_tmds_output(
+			link->link_enc,
 			pipe_ctx->clock_source->id,
 			display_color_depth,
+			pipe_ctx->stream->signal,
 			stream->phy_pix_clk);
 
 	if (dc_is_hdmi_signal(pipe_ctx->stream->signal))
@@ -2721,16 +2717,15 @@ static void enable_link_lvds(struct pipe_ctx *pipe_ctx)
 {
 	struct dc_stream_state *stream = pipe_ctx->stream;
 	struct dc_link *link = stream->link;
-	struct dc *dc = stream->ctx->dc;
 
 	if (stream->phy_pix_clk == 0)
 		stream->phy_pix_clk = stream->timing.pix_clk_100hz / 10;
 
 	memset(&stream->link->cur_link_settings, 0,
 			sizeof(struct dc_link_settings));
-	dc->hwss.enable_lvds_link_output(
-			link,
-			&pipe_ctx->link_res,
+
+	link->link_enc->funcs->enable_lvds_output(
+			link->link_enc,
 			pipe_ctx->clock_source->id,
 			stream->phy_pix_clk);
 
@@ -3146,7 +3141,7 @@ bool dc_link_set_psr_allow_active(struct dc_link *link, const bool *allow_active
 	if (!dc_get_edp_link_panel_inst(dc, link, &panel_inst))
 		return false;
 
-	if ((allow_active != NULL) && (*allow_active == true) && (link->type == dc_connection_none)) {
+	if (allow_active && link->type == dc_connection_none) {
 		// Don't enter PSR if panel is not connected
 		return false;
 	}
@@ -3378,8 +3373,8 @@ bool dc_link_setup_psr(struct dc_link *link,
 		case FAMILY_YELLOW_CARP:
 		case AMDGPU_FAMILY_GC_10_3_6:
 		case AMDGPU_FAMILY_GC_11_0_1:
-			if (dc->debug.disable_z10)
-				psr_context->psr_level.bits.SKIP_CRTC_DISABLE = true;
+			if(!dc->debug.disable_z10)
+				psr_context->psr_level.bits.SKIP_CRTC_DISABLE = false;
 			break;
 		default:
 			psr_context->psr_level.bits.SKIP_CRTC_DISABLE = true;
@@ -3521,7 +3516,7 @@ static void update_mst_stream_alloc_table(
 	struct dc_link *link,
 	struct stream_encoder *stream_enc,
 	struct hpo_dp_stream_encoder *hpo_dp_stream_enc, // TODO: Rename stream_enc to dio_stream_enc?
-	const struct dc_dp_mst_stream_allocation_table *proposed_table)
+	const struct dp_mst_stream_allocation_table *proposed_table)
 {
 	struct link_mst_stream_allocation work_table[MAX_CONTROLLER_NUM] = { 0 };
 	struct link_mst_stream_allocation *dc_alloc;
@@ -3566,35 +3561,6 @@ static void update_mst_stream_alloc_table(
 	for (i = 0; i < MAX_CONTROLLER_NUM; i++)
 		link->mst_stream_alloc_table.stream_allocations[i] =
 				work_table[i];
-}
-
-static void remove_stream_from_alloc_table(
-		struct dc_link *link,
-		struct stream_encoder *dio_stream_enc,
-		struct hpo_dp_stream_encoder *hpo_dp_stream_enc)
-{
-	int i = 0;
-	struct link_mst_stream_allocation_table *table =
-			&link->mst_stream_alloc_table;
-
-	if (hpo_dp_stream_enc) {
-		for (; i < table->stream_count; i++)
-			if (hpo_dp_stream_enc == table->stream_allocations[i].hpo_dp_stream_enc)
-				break;
-	} else {
-		for (; i < table->stream_count; i++)
-			if (dio_stream_enc == table->stream_allocations[i].stream_enc)
-				break;
-	}
-
-	if (i < table->stream_count) {
-		i++;
-		for (; i < table->stream_count; i++)
-			table->stream_allocations[i-1] = table->stream_allocations[i];
-		memset(&table->stream_allocations[table->stream_count-1], 0,
-				sizeof(struct link_mst_stream_allocation));
-		table->stream_count--;
-	}
 }
 
 static void dc_log_vcp_x_y(const struct dc_link *link, struct fixed31_32 avg_time_slots_per_mtp)
@@ -3713,7 +3679,7 @@ enum dc_status dc_link_allocate_mst_payload(struct pipe_ctx *pipe_ctx)
 {
 	struct dc_stream_state *stream = pipe_ctx->stream;
 	struct dc_link *link = stream->link;
-	struct dc_dp_mst_stream_allocation_table proposed_table = {0};
+	struct dp_mst_stream_allocation_table proposed_table = {0};
 	struct fixed31_32 avg_time_slots_per_mtp;
 	struct fixed31_32 pbn;
 	struct fixed31_32 pbn_per_slot;
@@ -3818,7 +3784,7 @@ enum dc_status dc_link_reduce_mst_payload(struct pipe_ctx *pipe_ctx, uint32_t bw
 	struct fixed31_32 avg_time_slots_per_mtp;
 	struct fixed31_32 pbn;
 	struct fixed31_32 pbn_per_slot;
-	struct dc_dp_mst_stream_allocation_table proposed_table = {0};
+	struct dp_mst_stream_allocation_table proposed_table = {0};
 	uint8_t i;
 	const struct link_hwss *link_hwss = get_link_hwss(link, &pipe_ctx->link_res);
 	DC_LOGGER_INIT(link->ctx->logger);
@@ -3907,7 +3873,7 @@ enum dc_status dc_link_increase_mst_payload(struct pipe_ctx *pipe_ctx, uint32_t 
 	struct fixed31_32 avg_time_slots_per_mtp;
 	struct fixed31_32 pbn;
 	struct fixed31_32 pbn_per_slot;
-	struct dc_dp_mst_stream_allocation_table proposed_table = {0};
+	struct dp_mst_stream_allocation_table proposed_table = {0};
 	uint8_t i;
 	enum act_return_status ret;
 	const struct link_hwss *link_hwss = get_link_hwss(link, &pipe_ctx->link_res);
@@ -3991,16 +3957,13 @@ static enum dc_status deallocate_mst_payload(struct pipe_ctx *pipe_ctx)
 {
 	struct dc_stream_state *stream = pipe_ctx->stream;
 	struct dc_link *link = stream->link;
-	struct dc_dp_mst_stream_allocation_table proposed_table = {0};
+	struct dp_mst_stream_allocation_table proposed_table = {0};
 	struct fixed31_32 avg_time_slots_per_mtp = dc_fixpt_from_int(0);
 	int i;
 	bool mst_mode = (link->type == dc_connection_mst_branch);
-	/* adjust for drm changes*/
-	bool update_drm_mst_state = true;
 	const struct link_hwss *link_hwss = get_link_hwss(link, &pipe_ctx->link_res);
 	const struct dc_link_settings empty_link_settings = {0};
 	DC_LOGGER_INIT(link->ctx->logger);
-
 
 	/* deallocate_mst_payload is called before disable link. When mode or
 	 * disable/enable monitor, new stream is created which is not in link
@@ -4017,32 +3980,26 @@ static enum dc_status deallocate_mst_payload(struct pipe_ctx *pipe_ctx)
 				&empty_link_settings,
 				avg_time_slots_per_mtp);
 
-	if (mst_mode || update_drm_mst_state) {
-		/* when link is in mst mode, reply on mst manager to remove
-		 * payload
-		 */
+	/* TODO: which component is responsible for remove payload table? */
+	if (mst_mode) {
 		if (dm_helpers_dp_mst_write_payload_allocation_table(
 				stream->ctx,
 				stream,
 				&proposed_table,
-				false))
+				false)) {
 
 			update_mst_stream_alloc_table(
-					link,
-					pipe_ctx->stream_res.stream_enc,
-					pipe_ctx->stream_res.hpo_dp_stream_enc,
-					&proposed_table);
-		else
-			DC_LOG_WARNING("Failed to update"
-					"MST allocation table for"
-					"pipe idx:%d\n",
-					pipe_ctx->pipe_idx);
-	} else {
-		/* when link is no longer in mst mode (mst hub unplugged),
-		 * remove payload with default dc logic
-		 */
-		remove_stream_from_alloc_table(link, pipe_ctx->stream_res.stream_enc,
-				pipe_ctx->stream_res.hpo_dp_stream_enc);
+						link,
+						pipe_ctx->stream_res.stream_enc,
+						pipe_ctx->stream_res.hpo_dp_stream_enc,
+						&proposed_table);
+		}
+		else {
+				DC_LOG_WARNING("Failed to update"
+						"MST allocation table for"
+						"pipe idx:%d\n",
+						pipe_ctx->pipe_idx);
+		}
 	}
 
 	DC_LOG_MST("%s"
@@ -4080,18 +4037,11 @@ static enum dc_status deallocate_mst_payload(struct pipe_ctx *pipe_ctx)
 			stream->ctx,
 			stream);
 
-		if (!update_drm_mst_state)
-			dm_helpers_dp_mst_send_payload_allocation(
-				stream->ctx,
-				stream,
-				false);
-	}
-
-	if (update_drm_mst_state)
 		dm_helpers_dp_mst_send_payload_allocation(
 			stream->ctx,
 			stream,
 			false);
+	}
 
 	return DC_OK;
 }
@@ -4353,9 +4303,8 @@ void core_link_enable_stream(
 		 */
 		if (pipe_ctx->stream->timing.flags.DSC) {
 			if (dc_is_dp_signal(pipe_ctx->stream->signal) ||
-				dc_is_virtual_signal(pipe_ctx->stream->signal))
-			dp_set_dsc_enable(pipe_ctx, true);
-
+					dc_is_virtual_signal(pipe_ctx->stream->signal))
+				dp_set_dsc_enable(pipe_ctx, true);
 		}
 
 		status = enable_link(state, pipe_ctx);
@@ -4787,7 +4736,7 @@ bool dc_link_should_enable_fec(const struct dc_link *link)
 	else if (link->connector_signal == SIGNAL_TYPE_EDP
 			&& (link->dpcd_caps.dsc_caps.dsc_basic_caps.fields.
 			 dsc_support.DSC_SUPPORT == false
-				|| link->panel_config.dsc.disable_dsc_edp
+				|| link->dc->debug.disable_dsc_edp
 				|| !link->dc->caps.edp_dsc_support))
 		force_disable = true;
 

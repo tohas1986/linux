@@ -16,7 +16,6 @@
 #include <linux/idr.h>
 #include <linux/module.h>
 #include <linux/of.h>
-#include <linux/of_device.h>
 #include <linux/slab.h>
 #include <linux/bitops.h>
 #include <linux/cdev.h>
@@ -24,10 +23,6 @@
 #include <linux/uaccess.h>
 
 #include "fsi-master.h"
-#include "fsi-slave.h"
-
-#define CREATE_TRACE_POINTS
-#include <trace/events/fsi.h>
 
 #define FSI_SLAVE_CONF_NEXT_MASK	GENMASK(31, 31)
 #define FSI_SLAVE_CONF_SLOTS_MASK	GENMASK(23, 16)
@@ -82,6 +77,26 @@ static const int engine_page_size = 0x400;
 #define FSI_SLAVE_SIZE_23b		0x800000
 
 static DEFINE_IDA(master_ida);
+
+struct fsi_slave {
+	struct device		dev;
+	struct fsi_master	*master;
+	struct cdev		cdev;
+	int			cdev_idx;
+	int			id;	/* FSI address */
+	int			link;	/* FSI link# */
+	u32			cfam_id;
+	int			chip_id;
+	uint32_t		size;	/* size of slave address space */
+	u8			t_send_delay;
+	u8			t_echo_delay;
+};
+
+#define CREATE_TRACE_POINTS
+#include <trace/events/fsi.h>
+
+#define to_fsi_master(d) container_of(d, struct fsi_master, dev)
+#define to_fsi_slave(d) container_of(d, struct fsi_slave, dev)
 
 static const int slave_retries = 2;
 static int discard_errors;
@@ -956,34 +971,9 @@ static int __fsi_get_new_minor(struct fsi_slave *slave, enum fsi_dev_type type,
 	return 0;
 }
 
-static const char *const fsi_dev_type_names[] = {
-	"cfam",
-	"sbefifo",
-	"scom",
-	"occ",
-};
-
 int fsi_get_new_minor(struct fsi_device *fdev, enum fsi_dev_type type,
 		      dev_t *out_dev, int *out_index)
 {
-	if (fdev->dev.of_node) {
-		int aid = of_alias_get_id(fdev->dev.of_node, fsi_dev_type_names[type]);
-
-		if (aid >= 0) {
-			int id = (aid << 4) | type;
-
-			id = ida_simple_get(&fsi_minor_ida, id, id + 1, GFP_KERNEL);
-			if (id >= 0) {
-				*out_index = aid;
-				*out_dev = fsi_base_dev + id;
-				return 0;
-			}
-
-			if (id != -ENOSPC)
-				return id;
-		}
-	}
-
 	return __fsi_get_new_minor(fdev->slave, type, out_dev, out_index);
 }
 EXPORT_SYMBOL_GPL(fsi_get_new_minor);
@@ -1323,16 +1313,11 @@ int fsi_master_register(struct fsi_master *master)
 	struct device_node *np;
 
 	mutex_init(&master->scan_lock);
+	master->idx = ida_simple_get(&master_ida, 0, INT_MAX, GFP_KERNEL);
+	if (master->idx < 0)
+		return master->idx;
 
-	if (!master->idx) {
-		master->idx = ida_simple_get(&master_ida, 0, INT_MAX,
-					     GFP_KERNEL);
-		if (master->idx < 0)
-			return master->idx;
-
-		dev_set_name(&master->dev, "fsi%d", master->idx);
-	}
-
+	dev_set_name(&master->dev, "fsi%d", master->idx);
 	master->dev.class = &fsi_master_class;
 
 	rc = device_register(&master->dev);
@@ -1381,14 +1366,8 @@ static int fsi_bus_match(struct device *dev, struct device_driver *drv)
 		if (id->engine_type != fsi_dev->engine_type)
 			continue;
 		if (id->version == FSI_VERSION_ANY ||
-		    id->version == fsi_dev->version) {
-			if (drv->of_match_table) {
-				if (of_driver_match_device(dev, drv))
-					return 1;
-			} else {
-				return 1;
-			}
-		}
+				id->version == fsi_dev->version)
+			return 1;
 	}
 
 	return 0;

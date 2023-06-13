@@ -72,7 +72,6 @@ additionalProperties: false
 patternProperties:
   "^filter@[0-9]+$":
     type: object
-    unevaluatedProperties: false
     description: child node
 
     properties:
@@ -226,7 +225,6 @@ patternProperties:
           patternProperties:
             "^dfsdm-dai+$":
               type: object
-              additionalProperties: false
               description: child node
 
               properties:

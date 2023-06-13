@@ -11,7 +11,6 @@
 #include <linux/of_irq.h>
 #include <linux/of_address.h>
 #include <linux/of_platform.h>
-#include <linux/uaccess.h>
 #include <linux/termios.h>
 #include <linux/mfd/syscon.h>
 #include <linux/regmap.h>

@@ -3,9 +3,9 @@
 # Makefile for the Linux/Xtensa kernel.
 #
 
-extra-y := vmlinux.lds
+extra-y := head.o vmlinux.lds
 
-obj-y := head.o align.o coprocessor.o entry.o irq.o platform.o process.o \
+obj-y := align.o coprocessor.o entry.o irq.o platform.o process.o \
 	 ptrace.o setup.o signal.o stacktrace.o syscall.o time.o traps.o \
 	 vectors.o
 

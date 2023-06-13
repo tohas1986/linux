@@ -6,7 +6,6 @@
 #include <linux/io-64-nonatomic-lo-hi.h>
 #include <linux/psp-sev.h>
 #include <linux/types.h>
-#include <linux/workqueue.h>
 
 #include <asm/msr.h>
 
@@ -15,8 +14,6 @@
 #define MSR_AMD_PSP_ADDR	0xc00110a2
 #define PSP_MBOX_OFFSET		0x10570
 #define PSP_CMD_TIMEOUT_US	(500 * USEC_PER_MSEC)
-
-#define PSP_I2C_RESERVATION_TIME_MS 100
 
 #define PSP_I2C_REQ_BUS_CMD		0x64
 #define PSP_I2C_REQ_RETRY_CNT		400
@@ -243,41 +240,6 @@ cleanup:
 	return ret;
 }
 
-static void release_bus(void)
-{
-	int status;
-
-	if (!psp_i2c_sem_acquired)
-		return;
-
-	status = psp_send_i2c_req(PSP_I2C_REQ_RELEASE);
-	if (status)
-		return;
-
-	dev_dbg(psp_i2c_dev, "PSP semaphore held for %ums\n",
-		jiffies_to_msecs(jiffies - psp_i2c_sem_acquired));
-
-	psp_i2c_sem_acquired = 0;
-}
-
-static void psp_release_i2c_bus_deferred(struct work_struct *work)
-{
-	mutex_lock(&psp_i2c_access_mutex);
-
-	/*
-	 * If there is any pending transaction, cannot release the bus here.
-	 * psp_release_i2c_bus will take care of this later.
-	 */
-	if (psp_i2c_access_count)
-		goto cleanup;
-
-	release_bus();
-
-cleanup:
-	mutex_unlock(&psp_i2c_access_mutex);
-}
-static DECLARE_DELAYED_WORK(release_queue, psp_release_i2c_bus_deferred);
-
 static int psp_acquire_i2c_bus(void)
 {
 	int status;
@@ -288,23 +250,21 @@ static int psp_acquire_i2c_bus(void)
 	if (psp_i2c_mbox_fail)
 		goto cleanup;
 
-	psp_i2c_access_count++;
-
 	/*
-	 * No need to request bus arbitration once we are inside semaphore
-	 * reservation period.
+	 * Simply increment usage counter and return if PSP semaphore was
+	 * already taken by kernel.
 	 */
-	if (psp_i2c_sem_acquired)
+	if (psp_i2c_access_count) {
+		psp_i2c_access_count++;
 		goto cleanup;
+	}
 
 	status = psp_send_i2c_req(PSP_I2C_REQ_ACQUIRE);
 	if (status)
 		goto cleanup;
 
 	psp_i2c_sem_acquired = jiffies;
-
-	schedule_delayed_work(&release_queue,
-			      msecs_to_jiffies(PSP_I2C_RESERVATION_TIME_MS));
+	psp_i2c_access_count++;
 
 	/*
 	 * In case of errors with PSP arbitrator psp_i2c_mbox_fail variable is
@@ -319,6 +279,8 @@ cleanup:
 
 static void psp_release_i2c_bus(void)
 {
+	int status;
+
 	mutex_lock(&psp_i2c_access_mutex);
 
 	/* Return early if mailbox was malfunctional */
@@ -333,12 +295,13 @@ static void psp_release_i2c_bus(void)
 	if (psp_i2c_access_count)
 		goto cleanup;
 
-	/*
-	 * Send a release command to PSP if the semaphore reservation timeout
-	 * elapsed but x86 still owns the controller.
-	 */
-	if (!delayed_work_pending(&release_queue))
-		release_bus();
+	/* Send a release command to PSP */
+	status = psp_send_i2c_req(PSP_I2C_REQ_RELEASE);
+	if (status)
+		goto cleanup;
+
+	dev_dbg(psp_i2c_dev, "PSP semaphore held for %ums\n",
+		jiffies_to_msecs(jiffies - psp_i2c_sem_acquired));
 
 cleanup:
 	mutex_unlock(&psp_i2c_access_mutex);

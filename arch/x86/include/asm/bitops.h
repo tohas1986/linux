@@ -247,30 +247,17 @@ arch_test_bit_acquire(unsigned long nr, const volatile unsigned long *addr)
 					  variable_test_bit(nr, addr);
 }
 
-static __always_inline unsigned long variable__ffs(unsigned long word)
-{
-	asm("rep; bsf %1,%0"
-		: "=r" (word)
-		: "rm" (word));
-	return word;
-}
-
 /**
  * __ffs - find first set bit in word
  * @word: The word to search
  *
  * Undefined if no bit exists, so code should check against 0 first.
  */
-#define __ffs(word)				\
-	(__builtin_constant_p(word) ?		\
-	 (unsigned long)__builtin_ctzl(word) :	\
-	 variable__ffs(word))
-
-static __always_inline unsigned long variable_ffz(unsigned long word)
+static __always_inline unsigned long __ffs(unsigned long word)
 {
 	asm("rep; bsf %1,%0"
 		: "=r" (word)
-		: "r" (~word));
+		: "rm" (word));
 	return word;
 }
 
@@ -280,10 +267,13 @@ static __always_inline unsigned long variable_ffz(unsigned long word)
  *
  * Undefined if no zero exists, so code should check against ~0UL first.
  */
-#define ffz(word)				\
-	(__builtin_constant_p(word) ?		\
-	 (unsigned long)__builtin_ctzl(~word) :	\
-	 variable_ffz(word))
+static __always_inline unsigned long ffz(unsigned long word)
+{
+	asm("rep; bsf %1,%0"
+		: "=r" (word)
+		: "r" (~word));
+	return word;
+}
 
 /*
  * __fls: find last set bit in word
@@ -302,7 +292,18 @@ static __always_inline unsigned long __fls(unsigned long word)
 #undef ADDR
 
 #ifdef __KERNEL__
-static __always_inline int variable_ffs(int x)
+/**
+ * ffs - find first set bit in word
+ * @x: the word to search
+ *
+ * This is defined the same way as the libc and compiler builtin ffs
+ * routines, therefore differs in spirit from the other bitops.
+ *
+ * ffs(value) returns 0 if value is 0 or the position of the first
+ * set bit if value is nonzero. The first (least significant) bit
+ * is at position 1.
+ */
+static __always_inline int ffs(int x)
 {
 	int r;
 
@@ -331,19 +332,6 @@ static __always_inline int variable_ffs(int x)
 #endif
 	return r + 1;
 }
-
-/**
- * ffs - find first set bit in word
- * @x: the word to search
- *
- * This is defined the same way as the libc and compiler builtin ffs
- * routines, therefore differs in spirit from the other bitops.
- *
- * ffs(value) returns 0 if value is 0 or the position of the first
- * set bit if value is nonzero. The first (least significant) bit
- * is at position 1.
- */
-#define ffs(x) (__builtin_constant_p(x) ? __builtin_ffs(x) : variable_ffs(x))
 
 /**
  * fls - find last set bit in word

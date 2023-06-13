@@ -7,7 +7,6 @@
 
 #include <linux/module.h>
 #include <linux/ucb1400.h>
-#include <linux/gpio/driver.h>
 
 static int ucb1400_gpio_dir_in(struct gpio_chip *gc, unsigned off)
 {

@@ -71,10 +71,11 @@ MODULE_PARM_DESC(echo, "Echo sent frames (for testing). Default: 0 (Off)");
 
 static void vcan_rx(struct sk_buff *skb, struct net_device *dev)
 {
+	struct canfd_frame *cfd = (struct canfd_frame *)skb->data;
 	struct net_device_stats *stats = &dev->stats;
 
 	stats->rx_packets++;
-	stats->rx_bytes += can_skb_get_data_len(skb);
+	stats->rx_bytes += cfd->len;
 
 	skb->pkt_type  = PACKET_BROADCAST;
 	skb->dev       = dev;
@@ -85,14 +86,14 @@ static void vcan_rx(struct sk_buff *skb, struct net_device *dev)
 
 static netdev_tx_t vcan_tx(struct sk_buff *skb, struct net_device *dev)
 {
+	struct canfd_frame *cfd = (struct canfd_frame *)skb->data;
 	struct net_device_stats *stats = &dev->stats;
-	unsigned int len;
-	int loop;
+	int loop, len;
 
 	if (can_dropped_invalid_skb(dev, skb))
 		return NETDEV_TX_OK;
 
-	len = can_skb_get_data_len(skb);
+	len = cfd->can_id & CAN_RTR_FLAG ? 0 : cfd->len;
 	stats->tx_packets++;
 	stats->tx_bytes += len;
 
@@ -136,8 +137,7 @@ static int vcan_change_mtu(struct net_device *dev, int new_mtu)
 	if (dev->flags & IFF_UP)
 		return -EBUSY;
 
-	if (new_mtu != CAN_MTU && new_mtu != CANFD_MTU &&
-	    !can_is_canxl_dev_mtu(new_mtu))
+	if (new_mtu != CAN_MTU && new_mtu != CANFD_MTU)
 		return -EINVAL;
 
 	dev->mtu = new_mtu;

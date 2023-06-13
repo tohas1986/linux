@@ -57,6 +57,16 @@ properties:
     $ref: /schemas/types.yaml#/definitions/uint32
     enum: [1, 2, 4, 8]
 
+  linear-k:
+    description:
+      Linear correction multiplier in y = k*x + b
+    $ref: /schemas/types.yaml#/definitions/uint32
+
+  linear-b:
+    description:
+      Linear correction constant in y = k*x + b
+    $ref: /schemas/types.yaml#/definitions/uint32
+
 required:
   - compatible
   - reg

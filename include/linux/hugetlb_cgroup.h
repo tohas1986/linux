@@ -90,31 +90,32 @@ hugetlb_cgroup_from_page_rsvd(struct page *page)
 	return __hugetlb_cgroup_from_page(page, true);
 }
 
-static inline void __set_hugetlb_cgroup(struct page *page,
+static inline int __set_hugetlb_cgroup(struct page *page,
 				       struct hugetlb_cgroup *h_cg, bool rsvd)
 {
 	VM_BUG_ON_PAGE(!PageHuge(page), page);
 
 	if (compound_order(page) < HUGETLB_CGROUP_MIN_ORDER)
-		return;
+		return -1;
 	if (rsvd)
 		set_page_private(page + SUBPAGE_INDEX_CGROUP_RSVD,
 				 (unsigned long)h_cg);
 	else
 		set_page_private(page + SUBPAGE_INDEX_CGROUP,
 				 (unsigned long)h_cg);
+	return 0;
 }
 
-static inline void set_hugetlb_cgroup(struct page *page,
+static inline int set_hugetlb_cgroup(struct page *page,
 				     struct hugetlb_cgroup *h_cg)
 {
-	__set_hugetlb_cgroup(page, h_cg, false);
+	return __set_hugetlb_cgroup(page, h_cg, false);
 }
 
-static inline void set_hugetlb_cgroup_rsvd(struct page *page,
+static inline int set_hugetlb_cgroup_rsvd(struct page *page,
 					  struct hugetlb_cgroup *h_cg)
 {
-	__set_hugetlb_cgroup(page, h_cg, true);
+	return __set_hugetlb_cgroup(page, h_cg, true);
 }
 
 static inline bool hugetlb_cgroup_disabled(void)
@@ -198,14 +199,16 @@ hugetlb_cgroup_from_page_rsvd(struct page *page)
 	return NULL;
 }
 
-static inline void set_hugetlb_cgroup(struct page *page,
+static inline int set_hugetlb_cgroup(struct page *page,
 				     struct hugetlb_cgroup *h_cg)
 {
+	return 0;
 }
 
-static inline void set_hugetlb_cgroup_rsvd(struct page *page,
+static inline int set_hugetlb_cgroup_rsvd(struct page *page,
 					  struct hugetlb_cgroup *h_cg)
 {
+	return 0;
 }
 
 static inline bool hugetlb_cgroup_disabled(void)

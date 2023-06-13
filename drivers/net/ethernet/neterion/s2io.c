@@ -2386,7 +2386,7 @@ static void free_tx_buffers(struct s2io_nic *nic)
 			skb = s2io_txdl_getskb(&mac_control->fifos[i], txdp, j);
 			if (skb) {
 				swstats->mem_freed += skb->truesize;
-				dev_kfree_skb_irq(skb);
+				dev_kfree_skb(skb);
 				cnt++;
 			}
 		}
@@ -5348,9 +5348,9 @@ static void s2io_ethtool_gdrvinfo(struct net_device *dev,
 {
 	struct s2io_nic *sp = netdev_priv(dev);
 
-	strscpy(info->driver, s2io_driver_name, sizeof(info->driver));
-	strscpy(info->version, s2io_driver_version, sizeof(info->version));
-	strscpy(info->bus_info, pci_name(sp->pdev), sizeof(info->bus_info));
+	strlcpy(info->driver, s2io_driver_name, sizeof(info->driver));
+	strlcpy(info->version, s2io_driver_version, sizeof(info->version));
+	strlcpy(info->bus_info, pci_name(sp->pdev), sizeof(info->bus_info));
 }
 
 /**
@@ -7370,9 +7370,10 @@ static int rx_osm_handler(struct ring_info *ring_data, struct RxD_t * rxdp)
 		int get_off = ring_data->rx_curr_get_info.offset;
 		int buf0_len = RXD_GET_BUFFER0_SIZE_3(rxdp->Control_2);
 		int buf2_len = RXD_GET_BUFFER2_SIZE_3(rxdp->Control_2);
+		unsigned char *buff = skb_push(skb, buf0_len);
 
 		struct buffAdd *ba = &ring_data->ba[get_block][get_off];
-		skb_put_data(skb, ba->ba_0, buf0_len);
+		memcpy(buff, ba->ba_0, buf0_len);
 		skb_put(skb, buf2_len);
 	}
 
@@ -7915,10 +7916,10 @@ s2io_init_nic(struct pci_dev *pdev, const struct pci_device_id *pre)
 		for (i = 0; i < config->rx_ring_num ; i++) {
 			struct ring_info *ring = &mac_control->rings[i];
 
-			netif_napi_add(dev, &ring->napi, s2io_poll_msix);
+			netif_napi_add(dev, &ring->napi, s2io_poll_msix, 64);
 		}
 	} else {
-		netif_napi_add(dev, &sp->napi, s2io_poll_inta);
+		netif_napi_add(dev, &sp->napi, s2io_poll_inta, 64);
 	}
 
 	/* Not needed for Herc */

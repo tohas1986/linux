@@ -889,7 +889,6 @@ static int tc_set_edp_video_mode(struct tc_data *tc,
 	u32 dp0_syncval;
 	u32 bits_per_pixel = 24;
 	u32 in_bw, out_bw;
-	u32 dpipxlfmt;
 
 	/*
 	 * Recommended maximum number of symbols transferred in a transfer unit:
@@ -939,15 +938,10 @@ static int tc_set_edp_video_mode(struct tc_data *tc,
 	if (ret)
 		return ret;
 
-	dpipxlfmt = DE_POL_ACTIVE_HIGH | SUB_CFG_TYPE_CONFIG1 | DPI_BPP_RGB888;
-
-	if (mode->flags & DRM_MODE_FLAG_NVSYNC)
-		dpipxlfmt |= VS_POL_ACTIVE_LOW;
-
-	if (mode->flags & DRM_MODE_FLAG_NHSYNC)
-		dpipxlfmt |= HS_POL_ACTIVE_LOW;
-
-	ret = regmap_write(tc->regmap, DPIPXLFMT, dpipxlfmt);
+	ret = regmap_write(tc->regmap, DPIPXLFMT,
+			   VS_POL_ACTIVE_LOW | HS_POL_ACTIVE_LOW |
+			   DE_POL_ACTIVE_HIGH | SUB_CFG_TYPE_CONFIG1 |
+			   DPI_BPP_RGB888);
 	if (ret)
 		return ret;
 
@@ -1250,13 +1244,7 @@ static int tc_main_link_disable(struct tc_data *tc)
 	if (ret)
 		return ret;
 
-	ret = regmap_write(tc->regmap, DP0CTL, 0);
-	if (ret)
-		return ret;
-
-	return regmap_update_bits(tc->regmap, DP_PHY_CTRL,
-				  PHY_M0_RST | PHY_M1_RST | PHY_M0_EN,
-				  PHY_M0_RST | PHY_M1_RST);
+	return regmap_write(tc->regmap, DP0CTL, 0);
 }
 
 static int tc_dsi_rx_enable(struct tc_data *tc)
@@ -1264,10 +1252,10 @@ static int tc_dsi_rx_enable(struct tc_data *tc)
 	u32 value;
 	int ret;
 
-	regmap_write(tc->regmap, PPI_D0S_CLRSIPOCOUNT, 5);
-	regmap_write(tc->regmap, PPI_D1S_CLRSIPOCOUNT, 5);
-	regmap_write(tc->regmap, PPI_D2S_CLRSIPOCOUNT, 5);
-	regmap_write(tc->regmap, PPI_D3S_CLRSIPOCOUNT, 5);
+	regmap_write(tc->regmap, PPI_D0S_CLRSIPOCOUNT, 3);
+	regmap_write(tc->regmap, PPI_D1S_CLRSIPOCOUNT, 3);
+	regmap_write(tc->regmap, PPI_D2S_CLRSIPOCOUNT, 3);
+	regmap_write(tc->regmap, PPI_D3S_CLRSIPOCOUNT, 3);
 	regmap_write(tc->regmap, PPI_D0S_ATMR, 0);
 	regmap_write(tc->regmap, PPI_D1S_ATMR, 0);
 	regmap_write(tc->regmap, PPI_TX_RX_TA, TTA_GET | TTA_SURE);
@@ -1508,16 +1496,41 @@ tc_edp_bridge_atomic_disable(struct drm_bridge *bridge,
 		dev_err(tc->dev, "main link disable error: %d\n", ret);
 }
 
+static bool tc_bridge_mode_fixup(struct drm_bridge *bridge,
+				 const struct drm_display_mode *mode,
+				 struct drm_display_mode *adj)
+{
+	/* Fixup sync polarities, both hsync and vsync are active low */
+	adj->flags = mode->flags;
+	adj->flags |= (DRM_MODE_FLAG_NHSYNC | DRM_MODE_FLAG_NVSYNC);
+	adj->flags &= ~(DRM_MODE_FLAG_PHSYNC | DRM_MODE_FLAG_PVSYNC);
+
+	return true;
+}
+
+static int tc_common_atomic_check(struct drm_bridge *bridge,
+				  struct drm_bridge_state *bridge_state,
+				  struct drm_crtc_state *crtc_state,
+				  struct drm_connector_state *conn_state,
+				  const unsigned int max_khz)
+{
+	tc_bridge_mode_fixup(bridge, &crtc_state->mode,
+			     &crtc_state->adjusted_mode);
+
+	if (crtc_state->adjusted_mode.clock > max_khz)
+		return -EINVAL;
+
+	return 0;
+}
+
 static int tc_dpi_atomic_check(struct drm_bridge *bridge,
 			       struct drm_bridge_state *bridge_state,
 			       struct drm_crtc_state *crtc_state,
 			       struct drm_connector_state *conn_state)
 {
 	/* DSI->DPI interface clock limitation: upto 100 MHz */
-	if (crtc_state->adjusted_mode.clock > 100000)
-		return -EINVAL;
-
-	return 0;
+	return tc_common_atomic_check(bridge, bridge_state, crtc_state,
+				      conn_state, 100000);
 }
 
 static int tc_edp_atomic_check(struct drm_bridge *bridge,
@@ -1526,10 +1539,8 @@ static int tc_edp_atomic_check(struct drm_bridge *bridge,
 			       struct drm_connector_state *conn_state)
 {
 	/* DPI->(e)DP interface clock limitation: upto 154 MHz */
-	if (crtc_state->adjusted_mode.clock > 154000)
-		return -EINVAL;
-
-	return 0;
+	return tc_common_atomic_check(bridge, bridge_state, crtc_state,
+				      conn_state, 154000);
 }
 
 static enum drm_mode_status
@@ -1772,6 +1783,7 @@ static const struct drm_bridge_funcs tc_edp_bridge_funcs = {
 	.atomic_check = tc_edp_atomic_check,
 	.atomic_enable = tc_edp_bridge_atomic_enable,
 	.atomic_disable = tc_edp_bridge_atomic_disable,
+	.mode_fixup = tc_bridge_mode_fixup,
 	.detect = tc_bridge_detect,
 	.get_edid = tc_get_edid,
 	.atomic_duplicate_state = drm_atomic_helper_bridge_duplicate_state,
@@ -1913,23 +1925,22 @@ static int tc_mipi_dsi_host_attach(struct tc_data *tc)
 static int tc_probe_dpi_bridge_endpoint(struct tc_data *tc)
 {
 	struct device *dev = tc->dev;
-	struct drm_bridge *bridge;
 	struct drm_panel *panel;
 	int ret;
 
 	/* port@1 is the DPI input/output port */
-	ret = drm_of_find_panel_or_bridge(dev->of_node, 1, 0, &panel, &bridge);
+	ret = drm_of_find_panel_or_bridge(dev->of_node, 1, 0, &panel, NULL);
 	if (ret && ret != -ENODEV)
 		return ret;
 
 	if (panel) {
-		bridge = devm_drm_panel_bridge_add(dev, panel);
-		if (IS_ERR(bridge))
-			return PTR_ERR(bridge);
-	}
+		struct drm_bridge *panel_bridge;
 
-	if (bridge) {
-		tc->panel_bridge = bridge;
+		panel_bridge = devm_drm_panel_bridge_add(dev, panel);
+		if (IS_ERR(panel_bridge))
+			return PTR_ERR(panel_bridge);
+
+		tc->panel_bridge = panel_bridge;
 		tc->bridge.type = DRM_MODE_CONNECTOR_DPI;
 		tc->bridge.funcs = &tc_dpi_bridge_funcs;
 
@@ -2184,11 +2195,13 @@ static int tc_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	return 0;
 }
 
-static void tc_remove(struct i2c_client *client)
+static int tc_remove(struct i2c_client *client)
 {
 	struct tc_data *tc = i2c_get_clientdata(client);
 
 	drm_bridge_remove(&tc->bridge);
+
+	return 0;
 }
 
 static const struct i2c_device_id tc358767_i2c_ids[] = {

@@ -251,8 +251,15 @@ static void basic_walk(struct tcf_proto *tp, struct tcf_walker *arg,
 	struct basic_filter *f;
 
 	list_for_each_entry(f, &head->flist, link) {
-		if (!tc_cls_stats_dump(tp, arg, f))
+		if (arg->count < arg->skip)
+			goto skip;
+
+		if (arg->fn(tp, f, arg) < 0) {
+			arg->stop = 1;
 			break;
+		}
+skip:
+		arg->count++;
 	}
 }
 
@@ -261,7 +268,12 @@ static void basic_bind_class(void *fh, u32 classid, unsigned long cl, void *q,
 {
 	struct basic_filter *f = fh;
 
-	tc_cls_bind_class(classid, cl, q, &f->res, base);
+	if (f && f->res.classid == classid) {
+		if (cl)
+			__tcf_bind_filter(q, &f->res, base);
+		else
+			__tcf_unbind_filter(q, &f->res);
+	}
 }
 
 static int basic_dump(struct net *net, struct tcf_proto *tp, void *fh,

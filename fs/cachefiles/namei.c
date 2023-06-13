@@ -15,8 +15,9 @@
  * file or directory.  The caller must hold the inode lock.
  */
 static bool __cachefiles_mark_inode_in_use(struct cachefiles_object *object,
-					   struct inode *inode)
+					   struct dentry *dentry)
 {
+	struct inode *inode = d_backing_inode(dentry);
 	bool can_use = false;
 
 	if (!(inode->i_flags & S_KERNEL_FILE)) {
@@ -25,18 +26,21 @@ static bool __cachefiles_mark_inode_in_use(struct cachefiles_object *object,
 		can_use = true;
 	} else {
 		trace_cachefiles_mark_failed(object, inode);
+		pr_notice("cachefiles: Inode already in use: %pd (B=%lx)\n",
+			  dentry, inode->i_ino);
 	}
 
 	return can_use;
 }
 
 static bool cachefiles_mark_inode_in_use(struct cachefiles_object *object,
-					 struct inode *inode)
+					 struct dentry *dentry)
 {
+	struct inode *inode = d_backing_inode(dentry);
 	bool can_use;
 
 	inode_lock(inode);
-	can_use = __cachefiles_mark_inode_in_use(object, inode);
+	can_use = __cachefiles_mark_inode_in_use(object, dentry);
 	inode_unlock(inode);
 	return can_use;
 }
@@ -45,17 +49,21 @@ static bool cachefiles_mark_inode_in_use(struct cachefiles_object *object,
  * Unmark a backing inode.  The caller must hold the inode lock.
  */
 static void __cachefiles_unmark_inode_in_use(struct cachefiles_object *object,
-					     struct inode *inode)
+					     struct dentry *dentry)
 {
+	struct inode *inode = d_backing_inode(dentry);
+
 	inode->i_flags &= ~S_KERNEL_FILE;
 	trace_cachefiles_mark_inactive(object, inode);
 }
 
 static void cachefiles_do_unmark_inode_in_use(struct cachefiles_object *object,
-					      struct inode *inode)
+					      struct dentry *dentry)
 {
+	struct inode *inode = d_backing_inode(dentry);
+
 	inode_lock(inode);
-	__cachefiles_unmark_inode_in_use(object, inode);
+	__cachefiles_unmark_inode_in_use(object, dentry);
 	inode_unlock(inode);
 }
 
@@ -69,12 +77,14 @@ void cachefiles_unmark_inode_in_use(struct cachefiles_object *object,
 	struct cachefiles_cache *cache = object->volume->cache;
 	struct inode *inode = file_inode(file);
 
-	cachefiles_do_unmark_inode_in_use(object, inode);
+	if (inode) {
+		cachefiles_do_unmark_inode_in_use(object, file->f_path.dentry);
 
-	if (!test_bit(CACHEFILES_OBJECT_USING_TMPFILE, &object->flags)) {
-		atomic_long_add(inode->i_blocks, &cache->b_released);
-		if (atomic_inc_return(&cache->f_released))
-			cachefiles_state_changed(cache);
+		if (!test_bit(CACHEFILES_OBJECT_USING_TMPFILE, &object->flags)) {
+			atomic_long_add(inode->i_blocks, &cache->b_released);
+			if (atomic_inc_return(&cache->f_released))
+				cachefiles_state_changed(cache);
+		}
 	}
 }
 
@@ -154,11 +164,8 @@ retry:
 	inode_lock(d_inode(subdir));
 	inode_unlock(d_inode(dir));
 
-	if (!__cachefiles_mark_inode_in_use(NULL, d_inode(subdir))) {
-		pr_notice("cachefiles: Inode already in use: %pd (B=%lx)\n",
-			  subdir, d_inode(subdir)->i_ino);
+	if (!__cachefiles_mark_inode_in_use(NULL, subdir))
 		goto mark_error;
-	}
 
 	inode_unlock(d_inode(subdir));
 
@@ -217,7 +224,9 @@ nomem_d_alloc:
 void cachefiles_put_directory(struct dentry *dir)
 {
 	if (dir) {
-		cachefiles_do_unmark_inode_in_use(NULL, d_inode(dir));
+		inode_lock(dir->d_inode);
+		__cachefiles_unmark_inode_in_use(NULL, dir);
+		inode_unlock(dir->d_inode);
 		dput(dir);
 	}
 }
@@ -401,7 +410,7 @@ try_again:
 					    "Rename failed with error %d", ret);
 	}
 
-	__cachefiles_unmark_inode_in_use(object, d_inode(rep));
+	__cachefiles_unmark_inode_in_use(object, rep);
 	unlock_rename(cache->graveyard, dir);
 	dput(grave);
 	_leave(" = 0");
@@ -442,72 +451,84 @@ struct file *cachefiles_create_tmpfile(struct cachefiles_object *object)
 	const struct cred *saved_cred;
 	struct dentry *fan = volume->fanout[(u8)object->cookie->key_hash];
 	struct file *file;
-	const struct path parentpath = { .mnt = cache->mnt, .dentry = fan };
+	struct path path;
 	uint64_t ni_size;
 	long ret;
 
 
 	cachefiles_begin_secure(cache, &saved_cred);
 
+	path.mnt = cache->mnt;
 	ret = cachefiles_inject_write_error();
-	if (ret == 0) {
-		file = vfs_tmpfile_open(&init_user_ns, &parentpath, S_IFREG,
-					O_RDWR | O_LARGEFILE | O_DIRECT,
-					cache->cache_cred);
-		ret = PTR_ERR_OR_ZERO(file);
-	}
-	if (ret) {
-		trace_cachefiles_vfs_error(object, d_inode(fan), ret,
+	if (ret == 0)
+		path.dentry = vfs_tmpfile(&init_user_ns, fan, S_IFREG, O_RDWR);
+	else
+		path.dentry = ERR_PTR(ret);
+	if (IS_ERR(path.dentry)) {
+		trace_cachefiles_vfs_error(object, d_inode(fan), PTR_ERR(path.dentry),
 					   cachefiles_trace_tmpfile_error);
-		if (ret == -EIO)
+		if (PTR_ERR(path.dentry) == -EIO)
 			cachefiles_io_error_obj(object, "Failed to create tmpfile");
-		goto err;
+		file = ERR_CAST(path.dentry);
+		goto out;
 	}
 
-	trace_cachefiles_tmpfile(object, file_inode(file));
+	trace_cachefiles_tmpfile(object, d_backing_inode(path.dentry));
 
-	/* This is a newly created file with no other possible user */
-	if (!cachefiles_mark_inode_in_use(object, file_inode(file)))
-		WARN_ON(1);
+	if (!cachefiles_mark_inode_in_use(object, path.dentry)) {
+		file = ERR_PTR(-EBUSY);
+		goto out_dput;
+	}
 
 	ret = cachefiles_ondemand_init_object(object);
-	if (ret < 0)
-		goto err_unuse;
+	if (ret < 0) {
+		file = ERR_PTR(ret);
+		goto out_unuse;
+	}
 
 	ni_size = object->cookie->object_size;
 	ni_size = round_up(ni_size, CACHEFILES_DIO_BLOCK_SIZE);
 
 	if (ni_size > 0) {
-		trace_cachefiles_trunc(object, file_inode(file), 0, ni_size,
+		trace_cachefiles_trunc(object, d_backing_inode(path.dentry), 0, ni_size,
 				       cachefiles_trunc_expand_tmpfile);
 		ret = cachefiles_inject_write_error();
 		if (ret == 0)
-			ret = vfs_truncate(&file->f_path, ni_size);
+			ret = vfs_truncate(&path, ni_size);
 		if (ret < 0) {
 			trace_cachefiles_vfs_error(
-				object, file_inode(file), ret,
+				object, d_backing_inode(path.dentry), ret,
 				cachefiles_trace_trunc_error);
-			goto err_unuse;
+			file = ERR_PTR(ret);
+			goto out_unuse;
 		}
 	}
 
-	ret = -EINVAL;
+	file = open_with_fake_path(&path, O_RDWR | O_LARGEFILE | O_DIRECT,
+				   d_backing_inode(path.dentry), cache->cache_cred);
+	if (IS_ERR(file)) {
+		trace_cachefiles_vfs_error(object, d_backing_inode(path.dentry),
+					   PTR_ERR(file),
+					   cachefiles_trace_open_error);
+		goto out_unuse;
+	}
 	if (unlikely(!file->f_op->read_iter) ||
 	    unlikely(!file->f_op->write_iter)) {
 		fput(file);
 		pr_notice("Cache does not support read_iter and write_iter\n");
-		goto err_unuse;
+		file = ERR_PTR(-EINVAL);
+		goto out_unuse;
 	}
+
+	goto out_dput;
+
+out_unuse:
+	cachefiles_do_unmark_inode_in_use(object, path.dentry);
+out_dput:
+	dput(path.dentry);
 out:
 	cachefiles_end_secure(cache, saved_cred);
 	return file;
-
-err_unuse:
-	cachefiles_do_unmark_inode_in_use(object, file_inode(file));
-	fput(file);
-err:
-	file = ERR_PTR(ret);
-	goto out;
 }
 
 /*
@@ -548,11 +569,8 @@ static bool cachefiles_open_file(struct cachefiles_object *object,
 
 	_enter("%pd", dentry);
 
-	if (!cachefiles_mark_inode_in_use(object, d_inode(dentry))) {
-		pr_notice("cachefiles: Inode already in use: %pd (B=%lx)\n",
-			  dentry, d_inode(dentry)->i_ino);
+	if (!cachefiles_mark_inode_in_use(object, dentry))
 		return false;
-	}
 
 	/* We need to open a file interface onto a data file now as we can't do
 	 * it on demand because writeback called from do_exit() sees
@@ -606,7 +624,7 @@ check_failed:
 error_fput:
 	fput(file);
 error:
-	cachefiles_do_unmark_inode_in_use(object, d_inode(dentry));
+	cachefiles_do_unmark_inode_in_use(object, dentry);
 	dput(dentry);
 	return false;
 }

@@ -170,12 +170,15 @@ EXPORT_SYMBOL(nvdimm_namespace_disk_name);
 
 const uuid_t *nd_dev_to_uuid(struct device *dev)
 {
-	if (dev && is_namespace_pmem(dev)) {
+	if (!dev)
+		return &uuid_null;
+
+	if (is_namespace_pmem(dev)) {
 		struct nd_namespace_pmem *nspm = to_nd_namespace_pmem(dev);
 
 		return nspm->uuid;
-	}
-	return &uuid_null;
+	} else
+		return &uuid_null;
 }
 EXPORT_SYMBOL(nd_dev_to_uuid);
 
@@ -385,7 +388,7 @@ static resource_size_t init_dpa_allocation(struct nd_label_id *label_id,
  *
  * BLK-space is valid as long as it does not precede a PMEM
  * allocation in a given region. PMEM-space must be contiguous
- * and adjacent to an existing allocation (if one
+ * and adjacent to an existing existing allocation (if one
  * exists).  If reserving PMEM any space is valid.
  */
 static void space_valid(struct nd_region *nd_region, struct nvdimm_drvdata *ndd,
@@ -836,6 +839,7 @@ static ssize_t size_store(struct device *dev,
 {
 	struct nd_region *nd_region = to_nd_region(dev->parent);
 	unsigned long long val;
+	uuid_t **uuid = NULL;
 	int rc;
 
 	rc = kstrtoull(buf, 0, &val);
@@ -849,12 +853,16 @@ static ssize_t size_store(struct device *dev,
 	if (rc >= 0)
 		rc = nd_namespace_label_update(nd_region, dev);
 
-	/* setting size zero == 'delete namespace' */
-	if (rc == 0 && val == 0 && is_namespace_pmem(dev)) {
+	if (is_namespace_pmem(dev)) {
 		struct nd_namespace_pmem *nspm = to_nd_namespace_pmem(dev);
 
-		kfree(nspm->uuid);
-		nspm->uuid = NULL;
+		uuid = &nspm->uuid;
+	}
+
+	if (rc == 0 && val == 0 && uuid) {
+		/* setting size zero == 'delete namespace' */
+		kfree(*uuid);
+		*uuid = NULL;
 	}
 
 	dev_dbg(dev, "%llx %s (%d)\n", val, rc < 0 ? "fail" : "success", rc);

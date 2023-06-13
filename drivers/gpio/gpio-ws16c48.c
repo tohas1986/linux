@@ -27,8 +27,7 @@ module_param_hw_array(base, uint, ioport, &num_ws16c48, 0);
 MODULE_PARM_DESC(base, "WinSystems WS16C48 base addresses");
 
 static unsigned int irq[MAX_NUM_WS16C48];
-static unsigned int num_irq;
-module_param_hw_array(irq, uint, irq, &num_irq, 0);
+module_param_hw_array(irq, uint, irq, NULL, 0);
 MODULE_PARM_DESC(irq, "WinSystems WS16C48 interrupt line numbers");
 
 /**
@@ -502,7 +501,7 @@ static struct isa_driver ws16c48_driver = {
 	},
 };
 
-module_isa_driver_with_irq(ws16c48_driver, num_ws16c48, num_irq);
+module_isa_driver(ws16c48_driver, num_ws16c48);
 
 MODULE_AUTHOR("William Breathitt Gray <vilhelm.gray@gmail.com>");
 MODULE_DESCRIPTION("WinSystems WS16C48 GPIO driver");

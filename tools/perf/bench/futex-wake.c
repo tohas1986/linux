@@ -14,7 +14,6 @@
 #include <pthread.h>
 
 #include <signal.h>
-#include "../util/mutex.h"
 #include "../util/stat.h"
 #include <subcmd/parse-options.h>
 #include <linux/compiler.h>
@@ -35,8 +34,8 @@ static u_int32_t futex1 = 0;
 
 static pthread_t *worker;
 static bool done = false;
-static struct mutex thread_lock;
-static struct cond thread_parent, thread_worker;
+static pthread_mutex_t thread_lock;
+static pthread_cond_t thread_parent, thread_worker;
 static struct stats waketime_stats, wakeup_stats;
 static unsigned int threads_starting;
 static int futex_flag = 0;
@@ -66,12 +65,12 @@ static const char * const bench_futex_wake_usage[] = {
 
 static void *workerfn(void *arg __maybe_unused)
 {
-	mutex_lock(&thread_lock);
+	pthread_mutex_lock(&thread_lock);
 	threads_starting--;
 	if (!threads_starting)
-		cond_signal(&thread_parent);
-	cond_wait(&thread_worker, &thread_lock);
-	mutex_unlock(&thread_lock);
+		pthread_cond_signal(&thread_parent);
+	pthread_cond_wait(&thread_worker, &thread_lock);
+	pthread_mutex_unlock(&thread_lock);
 
 	while (1) {
 		if (futex_wait(&futex1, 0, NULL, futex_flag) != EINTR)
@@ -179,9 +178,9 @@ int bench_futex_wake(int argc, const char **argv)
 	init_stats(&wakeup_stats);
 	init_stats(&waketime_stats);
 	pthread_attr_init(&thread_attr);
-	mutex_init(&thread_lock);
-	cond_init(&thread_parent);
-	cond_init(&thread_worker);
+	pthread_mutex_init(&thread_lock, NULL);
+	pthread_cond_init(&thread_parent, NULL);
+	pthread_cond_init(&thread_worker, NULL);
 
 	for (j = 0; j < bench_repeat && !done; j++) {
 		unsigned int nwoken = 0;
@@ -191,11 +190,11 @@ int bench_futex_wake(int argc, const char **argv)
 		block_threads(worker, thread_attr, cpu);
 
 		/* make sure all threads are already blocked */
-		mutex_lock(&thread_lock);
+		pthread_mutex_lock(&thread_lock);
 		while (threads_starting)
-			cond_wait(&thread_parent, &thread_lock);
-		cond_broadcast(&thread_worker);
-		mutex_unlock(&thread_lock);
+			pthread_cond_wait(&thread_parent, &thread_lock);
+		pthread_cond_broadcast(&thread_worker);
+		pthread_mutex_unlock(&thread_lock);
 
 		usleep(100000);
 
@@ -225,9 +224,9 @@ int bench_futex_wake(int argc, const char **argv)
 	}
 
 	/* cleanup & report results */
-	cond_destroy(&thread_parent);
-	cond_destroy(&thread_worker);
-	mutex_destroy(&thread_lock);
+	pthread_cond_destroy(&thread_parent);
+	pthread_cond_destroy(&thread_worker);
+	pthread_mutex_destroy(&thread_lock);
 	pthread_attr_destroy(&thread_attr);
 
 	print_summary();

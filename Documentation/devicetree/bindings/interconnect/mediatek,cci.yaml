@@ -36,8 +36,7 @@ properties:
       - const: intermediate
 
   operating-points-v2: true
-  opp-table:
-    type: object
+  opp-table: true
 
   proc-supply:
     description:

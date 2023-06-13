@@ -1537,8 +1537,8 @@ void intel_guc_submission_reset_prepare(struct intel_guc *guc)
 	__reset_guc_busyness_stats(guc);
 
 	/* Flush IRQ handler */
-	spin_lock_irq(guc_to_gt(guc)->irq_lock);
-	spin_unlock_irq(guc_to_gt(guc)->irq_lock);
+	spin_lock_irq(&guc_to_gt(guc)->irq_lock);
+	spin_unlock_irq(&guc_to_gt(guc)->irq_lock);
 
 	guc_flush_submissions(guc);
 	guc_flush_destroyed_contexts(guc);
@@ -1685,7 +1685,7 @@ static void __guc_reset_context(struct intel_context *ce, intel_engine_mask_t st
 			goto next_context;
 
 		guilty = false;
-		rq = intel_context_get_active_request(ce);
+		rq = intel_context_find_active_request(ce);
 		if (!rq) {
 			head = ce->ring->tail;
 			goto out_replay;
@@ -1698,7 +1698,6 @@ static void __guc_reset_context(struct intel_context *ce, intel_engine_mask_t st
 		head = intel_ring_wrap(ce->ring, rq->head);
 
 		__i915_request_reset(rq, guilty);
-		i915_request_put(rq);
 out_replay:
 		guc_reset_state(ce, head, guilty);
 next_context:
@@ -1874,7 +1873,7 @@ int intel_guc_submission_init(struct intel_guc *guc)
 	if (guc->submission_initialized)
 		return 0;
 
-	if (GET_UC_VER(guc) < MAKE_UC_VER(70, 0, 0)) {
+	if (guc->fw.major_ver_found < 70) {
 		ret = guc_lrc_desc_pool_create_v69(guc);
 		if (ret)
 			return ret;
@@ -2309,7 +2308,7 @@ static int register_context(struct intel_context *ce, bool loop)
 	GEM_BUG_ON(intel_context_is_child(ce));
 	trace_intel_context_register(ce);
 
-	if (GET_UC_VER(guc) >= MAKE_UC_VER(70, 0, 0))
+	if (guc->fw.major_ver_found >= 70)
 		ret = register_context_v70(guc, ce, loop);
 	else
 		ret = register_context_v69(guc, ce, loop);
@@ -2321,7 +2320,7 @@ static int register_context(struct intel_context *ce, bool loop)
 		set_context_registered(ce);
 		spin_unlock_irqrestore(&ce->guc_state.lock, flags);
 
-		if (GET_UC_VER(guc) >= MAKE_UC_VER(70, 0, 0))
+		if (guc->fw.major_ver_found >= 70)
 			guc_context_policy_init_v70(ce, loop);
 	}
 
@@ -2426,14 +2425,11 @@ static int guc_context_policy_init_v70(struct intel_context *ce, bool loop)
 	struct context_policy policy;
 	u32 execution_quantum;
 	u32 preemption_timeout;
+	bool missing = false;
 	unsigned long flags;
 	int ret;
 
 	/* NB: For both of these, zero means disabled. */
-	GEM_BUG_ON(overflows_type(engine->props.timeslice_duration_ms * 1000,
-				  execution_quantum));
-	GEM_BUG_ON(overflows_type(engine->props.preempt_timeout_ms * 1000,
-				  preemption_timeout));
 	execution_quantum = engine->props.timeslice_duration_ms * 1000;
 	preemption_timeout = engine->props.preempt_timeout_ms * 1000;
 
@@ -2447,9 +2443,32 @@ static int guc_context_policy_init_v70(struct intel_context *ce, bool loop)
 		__guc_context_policy_add_preempt_to_idle(&policy, 1);
 
 	ret = __guc_context_set_context_policies(guc, &policy, loop);
+	missing = ret != 0;
+
+	if (!missing && intel_context_is_parent(ce)) {
+		struct intel_context *child;
+
+		for_each_child(ce, child) {
+			__guc_context_policy_start_klv(&policy, child->guc_id.id);
+
+			if (engine->flags & I915_ENGINE_WANT_FORCED_PREEMPTION)
+				__guc_context_policy_add_preempt_to_idle(&policy, 1);
+
+			child->guc_state.prio = ce->guc_state.prio;
+			__guc_context_policy_add_priority(&policy, ce->guc_state.prio);
+			__guc_context_policy_add_execution_quantum(&policy, execution_quantum);
+			__guc_context_policy_add_preemption_timeout(&policy, preemption_timeout);
+
+			ret = __guc_context_set_context_policies(guc, &policy, loop);
+			if (ret) {
+				missing = true;
+				break;
+			}
+		}
+	}
 
 	spin_lock_irqsave(&ce->guc_state.lock, flags);
-	if (ret != 0)
+	if (missing)
 		set_context_policy_required(ce);
 	else
 		clr_context_policy_required(ce);
@@ -2467,10 +2486,6 @@ static void guc_context_policy_init_v69(struct intel_engine_cs *engine,
 		desc->policy_flags |= CONTEXT_POLICY_FLAG_PREEMPT_TO_IDLE_V69;
 
 	/* NB: For both of these, zero means disabled. */
-	GEM_BUG_ON(overflows_type(engine->props.timeslice_duration_ms * 1000,
-				  desc->execution_quantum));
-	GEM_BUG_ON(overflows_type(engine->props.preempt_timeout_ms * 1000,
-				  desc->preemption_timeout));
 	desc->execution_quantum = engine->props.timeslice_duration_ms * 1000;
 	desc->preemption_timeout = engine->props.preempt_timeout_ms * 1000;
 }
@@ -2935,7 +2950,7 @@ static void __guc_context_set_preemption_timeout(struct intel_guc *guc,
 						 u16 guc_id,
 						 u32 preemption_timeout)
 {
-	if (GET_UC_VER(guc) >= MAKE_UC_VER(70, 0, 0)) {
+	if (guc->fw.major_ver_found >= 70) {
 		struct context_policy policy;
 
 		__guc_context_policy_start_klv(&policy, guc_id);
@@ -3200,7 +3215,7 @@ static int guc_context_alloc(struct intel_context *ce)
 static void __guc_context_set_prio(struct intel_guc *guc,
 				   struct intel_context *ce)
 {
-	if (GET_UC_VER(guc) >= MAKE_UC_VER(70, 0, 0)) {
+	if (guc->fw.major_ver_found >= 70) {
 		struct context_policy policy;
 
 		__guc_context_policy_start_klv(&policy, ce->guc_id.id);
@@ -4188,27 +4203,13 @@ int intel_guc_submission_setup(struct intel_engine_cs *engine)
 
 void intel_guc_submission_enable(struct intel_guc *guc)
 {
-	struct intel_gt *gt = guc_to_gt(guc);
-
-	/* Enable and route to GuC */
-	if (GRAPHICS_VER(gt->i915) >= 12)
-		intel_uncore_write(gt->uncore, GEN12_GUC_SEM_INTR_ENABLES,
-				   GUC_SEM_INTR_ROUTE_TO_GUC |
-				   GUC_SEM_INTR_ENABLE_ALL);
-
 	guc_init_lrc_mapping(guc);
 	guc_init_engine_stats(guc);
 }
 
 void intel_guc_submission_disable(struct intel_guc *guc)
 {
-	struct intel_gt *gt = guc_to_gt(guc);
-
 	/* Note: By the time we're here, GuC may have already been reset */
-
-	/* Disable and route to host */
-	if (GRAPHICS_VER(gt->i915) >= 12)
-		intel_uncore_write(gt->uncore, GEN12_GUC_SEM_INTR_ENABLES, 0x0);
 }
 
 static bool __guc_submission_supported(struct intel_guc *guc)
@@ -4588,8 +4589,6 @@ void intel_guc_find_hung_context(struct intel_engine_cs *engine)
 
 	xa_lock_irqsave(&guc->context_lookup, flags);
 	xa_for_each(&guc->context_lookup, index, ce) {
-		bool found;
-
 		if (!kref_get_unless_zero(&ce->ref))
 			continue;
 
@@ -4606,18 +4605,10 @@ void intel_guc_find_hung_context(struct intel_engine_cs *engine)
 				goto next;
 		}
 
-		found = false;
-		spin_lock(&ce->guc_state.lock);
 		list_for_each_entry(rq, &ce->guc_state.requests, sched.link) {
 			if (i915_test_request_state(rq) != I915_REQUEST_ACTIVE)
 				continue;
 
-			found = true;
-			break;
-		}
-		spin_unlock(&ce->guc_state.lock);
-
-		if (found) {
 			intel_engine_set_hung_context(engine, ce);
 
 			/* Can only cope with one hang at a time... */
@@ -4625,7 +4616,6 @@ void intel_guc_find_hung_context(struct intel_engine_cs *engine)
 			xa_lock(&guc->context_lookup);
 			goto done;
 		}
-
 next:
 		intel_context_put(ce);
 		xa_lock(&guc->context_lookup);
@@ -5185,5 +5175,4 @@ bool intel_guc_virtual_engine_has_heartbeat(const struct intel_engine_cs *ve)
 #if IS_ENABLED(CONFIG_DRM_I915_SELFTEST)
 #include "selftest_guc.c"
 #include "selftest_guc_multi_lrc.c"
-#include "selftest_guc_hangcheck.c"
 #endif

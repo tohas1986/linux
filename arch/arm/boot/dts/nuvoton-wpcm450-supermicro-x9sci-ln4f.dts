@@ -15,11 +15,6 @@
 	model = "Supermicro X9SCi-LN4F BMC";
 	compatible = "supermicro,x9sci-ln4f-bmc", "nuvoton,wpcm450";
 
-	aliases {
-		serial0 = &serial0;
-		serial1 = &serial1;
-	};
-
 	chosen {
 		stdout-path = "serial0:115200n8";
 	};
@@ -58,24 +53,6 @@
 	};
 };
 
-&gpio0 {
-	gpio-line-names =
-		/* 0 */ "", "host-reset-control-n", "", "", "", "", "", "",
-		/* 8 */ "", "", "", "", "power-chassis-control-n", "", "uid-button", "";
-};
-
-&gpio1 {
-	gpio-line-names =
-		/* 0 */ "", "", "", "", "led-heartbeat", "", "", "led-uid",
-		/* 8 */ "", "", "", "", "", "", "", "";
-};
-
-&gpio4 {
-	gpio-line-names =
-		/* 0 */ "", "", "", "", "", "", "", "",
-		/* 8 */ "", "", "", "", "", "", "", "power-chassis-good";
-};
-
 &pinctrl {
 	key_pins: mux-keys {
 		groups = "gspi", "sspi";
@@ -98,5 +75,9 @@
 
 &serial1 {
 	/* "Serial over LAN" port. Connected to ttyS2 of the host system. */
+	status = "okay";
+};
+
+&watchdog0 {
 	status = "okay";
 };

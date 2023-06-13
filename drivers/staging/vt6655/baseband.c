@@ -2083,7 +2083,7 @@ bool bb_vt3253_init(struct vnt_private *priv)
 		priv->dbm_threshold[2] = 0;
 		priv->dbm_threshold[3] = 0;
 		/* Fix VT3226 DFC system timing issue */
-		vt6655_mac_word_reg_bits_on(iobase, MAC_REG_SOFTPWRCTL, SOFTPWRCTL_RFLEOPT);
+		MACvSetRFLE_LatchBase(iobase);
 		/* {{ RobertYu: 20050104 */
 	} else {
 		/* No VGA Table now */

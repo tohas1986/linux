@@ -384,7 +384,7 @@ static void au0828_copy_video(struct au0828_dev *dev,
 }
 
 /*
- * generic routine to get the next available buffer
+ * video-buf generic routine to get the next available buffer
  */
 static inline void get_next_buf(struct au0828_dmaqueue *dma_q,
 				struct au0828_buffer **buf)
@@ -459,7 +459,7 @@ static void au0828_copy_vbi(struct au0828_dev *dev,
 
 
 /*
- * generic routine to get the next available VBI buffer
+ * video-buf generic routine to get the next available VBI buffer
  */
 static inline void vbi_get_next_buf(struct au0828_dmaqueue *dma_q,
 				    struct au0828_buffer **buf)

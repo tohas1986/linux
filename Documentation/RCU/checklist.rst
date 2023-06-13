@@ -66,13 +66,8 @@ over a rather long period of time, but improvements are always welcome!
 	As a rough rule of thumb, any dereference of an RCU-protected
 	pointer must be covered by rcu_read_lock(), rcu_read_lock_bh(),
 	rcu_read_lock_sched(), or by the appropriate update-side lock.
-	Explicit disabling of preemption (preempt_disable(), for example)
-	can serve as rcu_read_lock_sched(), but is less readable and
-	prevents lockdep from detecting locking issues.
-
-	Please not that you *cannot* rely on code known to be built
-	only in non-preemptible kernels.  Such code can and will break,
-	especially in kernels built with CONFIG_PREEMPT_COUNT=y.
+	Disabling of preemption can serve as rcu_read_lock_sched(), but
+	is less readable and prevents lockdep from detecting locking issues.
 
 	Letting RCU-protected pointers "leak" out of an RCU read-side
 	critical section is every bit as bad as letting them leak out
@@ -190,9 +185,6 @@ over a rather long period of time, but improvements are always welcome!
 
 5.	If call_rcu() or call_srcu() is used, the callback function will
 	be called from softirq context.  In particular, it cannot block.
-	If you need the callback to block, run that code in a workqueue
-	handler scheduled from the callback.  The queue_rcu_work()
-	function does this for you in the case of call_rcu().
 
 6.	Since synchronize_rcu() can block, it cannot be called
 	from any sort of irq context.  The same rule applies
@@ -305,8 +297,7 @@ over a rather long period of time, but improvements are always welcome!
 		the machine.
 
 	d.	Periodically invoke synchronize_rcu(), permitting a limited
-		number of updates per grace period.  Better yet, periodically
-		invoke rcu_barrier() to wait for all outstanding callbacks.
+		number of updates per grace period.
 
 	The same cautions apply to call_srcu() and kfree_rcu().
 
@@ -486,6 +477,6 @@ over a rather long period of time, but improvements are always welcome!
 	So if you need to wait for both an RCU grace period and for
 	all pre-existing call_rcu() callbacks, you will need to execute
 	both rcu_barrier() and synchronize_rcu(), if necessary, using
-	something like workqueues to execute them concurrently.
+	something like workqueues to to execute them concurrently.
 
 	See rcubarrier.rst for more information.

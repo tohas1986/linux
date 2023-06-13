@@ -456,7 +456,7 @@ out_free:
                              Notification Handling
    -------------------------------------------------------------------------- */
 
-/*
+/**
  * acpi_bus_notify
  * ---------------
  * Callback for all 'system-level' device notifications (values 0x00-0x7F).
@@ -511,7 +511,7 @@ static void acpi_bus_notify(acpi_handle handle, u32 type, void *data)
 		break;
 	}
 
-	adev = acpi_get_acpi_dev(handle);
+	adev = acpi_bus_get_acpi_device(handle);
 	if (!adev)
 		goto err;
 
@@ -524,14 +524,14 @@ static void acpi_bus_notify(acpi_handle handle, u32 type, void *data)
 	}
 
 	if (!hotplug_event) {
-		acpi_put_acpi_dev(adev);
+		acpi_bus_put_acpi_device(adev);
 		return;
 	}
 
 	if (ACPI_SUCCESS(acpi_hotplug_schedule(adev, type)))
 		return;
 
-	acpi_put_acpi_dev(adev);
+	acpi_bus_put_acpi_device(adev);
 
  err:
 	acpi_evaluate_ost(handle, type, ost_code, NULL);
@@ -802,7 +802,7 @@ static bool acpi_of_modalias(struct acpi_device *adev,
 
 	str = obj->string.pointer;
 	chr = strchr(str, ',');
-	strscpy(modalias, chr ? chr + 1 : str, len);
+	strlcpy(modalias, chr ? chr + 1 : str, len);
 
 	return true;
 }
@@ -822,7 +822,7 @@ void acpi_set_modalias(struct acpi_device *adev, const char *default_id,
 		       char *modalias, size_t len)
 {
 	if (!acpi_of_modalias(adev, modalias, len))
-		strscpy(modalias, default_id, len);
+		strlcpy(modalias, default_id, len);
 }
 EXPORT_SYMBOL_GPL(acpi_set_modalias);
 
@@ -925,13 +925,12 @@ static const void *acpi_of_device_get_match_data(const struct device *dev)
 
 const void *acpi_device_get_match_data(const struct device *dev)
 {
-	const struct acpi_device_id *acpi_ids = dev->driver->acpi_match_table;
 	const struct acpi_device_id *match;
 
-	if (!acpi_ids)
+	if (!dev->driver->acpi_match_table)
 		return acpi_of_device_get_match_data(dev);
 
-	match = acpi_match_device(acpi_ids, dev);
+	match = acpi_match_device(dev->driver->acpi_match_table, dev);
 	if (!match)
 		return NULL;
 
@@ -949,13 +948,14 @@ EXPORT_SYMBOL(acpi_match_device_ids);
 bool acpi_driver_match_device(struct device *dev,
 			      const struct device_driver *drv)
 {
-	const struct acpi_device_id *acpi_ids = drv->acpi_match_table;
-	const struct of_device_id *of_ids = drv->of_match_table;
+	if (!drv->acpi_match_table)
+		return acpi_of_match_device(ACPI_COMPANION(dev),
+					    drv->of_match_table,
+					    NULL);
 
-	if (!acpi_ids)
-		return acpi_of_match_device(ACPI_COMPANION(dev), of_ids, NULL);
-
-	return __acpi_match_device(acpi_companion_match(dev), acpi_ids, of_ids, NULL, NULL);
+	return __acpi_match_device(acpi_companion_match(dev),
+				   drv->acpi_match_table, drv->of_match_table,
+				   NULL, NULL);
 }
 EXPORT_SYMBOL_GPL(acpi_driver_match_device);
 
@@ -973,13 +973,16 @@ EXPORT_SYMBOL_GPL(acpi_driver_match_device);
  */
 int acpi_bus_register_driver(struct acpi_driver *driver)
 {
+	int ret;
+
 	if (acpi_disabled)
 		return -ENODEV;
 	driver->drv.name = driver->name;
 	driver->drv.bus = &acpi_bus_type;
 	driver->drv.owner = driver->owner;
 
-	return driver_register(&driver->drv);
+	ret = driver_register(&driver->drv);
+	return ret;
 }
 
 EXPORT_SYMBOL(acpi_bus_register_driver);

@@ -321,6 +321,7 @@ static inline int audit_rate_check(void)
 	static DEFINE_SPINLOCK(lock);
 	unsigned long		flags;
 	unsigned long		now;
+	unsigned long		elapsed;
 	int			retval	   = 0;
 
 	if (!audit_rate_limit) return 1;
@@ -329,8 +330,9 @@ static inline int audit_rate_check(void)
 	if (++messages < audit_rate_limit) {
 		retval = 1;
 	} else {
-		now = jiffies;
-		if (time_after(now, last_check + HZ)) {
+		now     = jiffies;
+		elapsed = now - last_check;
+		if (elapsed > HZ) {
 			last_check = now;
 			messages   = 0;
 			retval     = 1;
@@ -364,7 +366,7 @@ void audit_log_lost(const char *message)
 	if (!print) {
 		spin_lock_irqsave(&lock, flags);
 		now = jiffies;
-		if (time_after(now, last_msg + HZ)) {
+		if (now - last_msg > HZ) {
 			print = 1;
 			last_msg = now;
 		}

@@ -121,7 +121,7 @@
 	BPF_EXIT_INSN(),
 	},
 	.fixup_map_hash_8b = { 1 },
-	/* The unprivileged case is not too interesting; variable
+	/* The unpriviledged case is not too interesting; variable
 	 * stack access is rejected.
 	 */
 	.errstr_unpriv = "R2 variable stack access prohibited for !root",

@@ -555,6 +555,7 @@ static const struct cqhci_host_ops sdhci_am654_cqhci_ops = {
 static int sdhci_am654_cqe_add_host(struct sdhci_host *host)
 {
 	struct cqhci_host *cq_host;
+	int ret;
 
 	cq_host = devm_kzalloc(mmc_dev(host->mmc), sizeof(struct cqhci_host),
 			       GFP_KERNEL);
@@ -568,7 +569,9 @@ static int sdhci_am654_cqe_add_host(struct sdhci_host *host)
 
 	host->mmc->caps2 |= MMC_CAP2_CQE;
 
-	return cqhci_init(cq_host, host->mmc, 1);
+	ret = cqhci_init(cq_host, host->mmc, 1);
+
+	return ret;
 }
 
 static int sdhci_am654_get_otap_delay(struct sdhci_host *host,

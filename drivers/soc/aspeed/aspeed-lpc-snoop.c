@@ -69,6 +69,7 @@ struct aspeed_lpc_snoop {
 	int			irq;
 	struct clk		*clk;
 	struct aspeed_lpc_snoop_channel chan[NUM_SNOOP_CHANNELS];
+	u8 prev_val[NUM_SNOOP_CHANNELS];
 };
 
 static struct aspeed_lpc_snoop_channel *snoop_file_to_chan(struct file *file)
@@ -149,12 +150,18 @@ static irqreturn_t aspeed_lpc_snoop_irq(int irq, void *arg)
 	if (reg & HICR6_STR_SNP0W) {
 		u8 val = (data & SNPWDR_CH0_MASK) >> SNPWDR_CH0_SHIFT;
 
-		put_fifo_with_discard(&lpc_snoop->chan[0], val);
+		if (val != lpc_snoop->prev_val[0]) {
+			put_fifo_with_discard(&lpc_snoop->chan[0], val);
+			lpc_snoop->prev_val[0] = val;
+		}
 	}
 	if (reg & HICR6_STR_SNP1W) {
 		u8 val = (data & SNPWDR_CH1_MASK) >> SNPWDR_CH1_SHIFT;
 
-		put_fifo_with_discard(&lpc_snoop->chan[1], val);
+		if (val != lpc_snoop->prev_val[1]) {
+			put_fifo_with_discard(&lpc_snoop->chan[1], val);
+			lpc_snoop->prev_val[1] = val;
+		}
 	}
 
 	return IRQ_HANDLED;
@@ -203,6 +210,7 @@ static int aspeed_lpc_enable_snoop(struct aspeed_lpc_snoop *lpc_snoop,
 		devm_kasprintf(dev, GFP_KERNEL, "%s%d", DEVICE_NAME, channel);
 	lpc_snoop->chan[channel].miscdev.fops = &snoop_fops;
 	lpc_snoop->chan[channel].miscdev.parent = dev;
+	lpc_snoop->prev_val[channel] = 0xff;
 	rc = misc_register(&lpc_snoop->chan[channel].miscdev);
 	if (rc)
 		return rc;
@@ -210,13 +218,13 @@ static int aspeed_lpc_enable_snoop(struct aspeed_lpc_snoop *lpc_snoop,
 	/* Enable LPC snoop channel at requested port */
 	switch (channel) {
 	case 0:
-		hicr5_en = HICR5_EN_SNP0W | HICR5_ENINT_SNP0W;
+		hicr5_en = HICR5_EN_SNP0W; // HICR5_ENINT_SNP0W will be enabled in user space
 		snpwadr_mask = SNPWADR_CH0_MASK;
 		snpwadr_shift = SNPWADR_CH0_SHIFT;
 		hicrb_en = HICRB_ENSNP0D;
 		break;
 	case 1:
-		hicr5_en = HICR5_EN_SNP1W | HICR5_ENINT_SNP1W;
+		hicr5_en = HICR5_EN_SNP1W; // HICR5_ENINT_SNP1W will be enabled in user space
 		snpwadr_mask = SNPWADR_CH1_MASK;
 		snpwadr_shift = SNPWADR_CH1_SHIFT;
 		hicrb_en = HICRB_ENSNP1D;

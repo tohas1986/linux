@@ -583,12 +583,14 @@ static int ch7033_probe(struct i2c_client *client,
 	return 0;
 }
 
-static void ch7033_remove(struct i2c_client *client)
+static int ch7033_remove(struct i2c_client *client)
 {
 	struct device *dev = &client->dev;
 	struct ch7033_priv *priv = dev_get_drvdata(dev);
 
 	drm_bridge_remove(&priv->bridge);
+
+	return 0;
 }
 
 static const struct of_device_id ch7033_dt_ids[] = {

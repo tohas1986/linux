@@ -855,7 +855,8 @@ static int fsl_lpspi_probe(struct platform_device *pdev)
 
 	init_completion(&fsl_lpspi->xfer_done);
 
-	fsl_lpspi->base = devm_platform_get_and_ioremap_resource(pdev, 0, &res);
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	fsl_lpspi->base = devm_ioremap_resource(&pdev->dev, res);
 	if (IS_ERR(fsl_lpspi->base)) {
 		ret = PTR_ERR(fsl_lpspi->base);
 		goto out_controller_put;
@@ -911,7 +912,7 @@ static int fsl_lpspi_probe(struct platform_device *pdev)
 
 	ret = devm_spi_register_controller(&pdev->dev, controller);
 	if (ret < 0) {
-		dev_err_probe(&pdev->dev, ret, "spi_register_controller error\n");
+		dev_err_probe(&pdev->dev, ret, "spi_register_controller error: %i\n", ret);
 		goto free_dma;
 	}
 
@@ -946,8 +947,11 @@ static int fsl_lpspi_remove(struct platform_device *pdev)
 
 static int __maybe_unused fsl_lpspi_suspend(struct device *dev)
 {
+	int ret;
+
 	pinctrl_pm_select_sleep_state(dev);
-	return pm_runtime_force_suspend(dev);
+	ret = pm_runtime_force_suspend(dev);
+	return ret;
 }
 
 static int __maybe_unused fsl_lpspi_resume(struct device *dev)

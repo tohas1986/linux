@@ -207,12 +207,13 @@ err_exit_irq:
 	return ret;
 }
 
-static void lp8788_remove(struct i2c_client *cl)
+static int lp8788_remove(struct i2c_client *cl)
 {
 	struct lp8788 *lp = i2c_get_clientdata(cl);
 
 	mfd_remove_devices(lp->dev);
 	lp8788_irq_exit(lp);
+	return 0;
 }
 
 static const struct i2c_device_id lp8788_ids[] = {

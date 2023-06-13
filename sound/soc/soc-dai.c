@@ -124,7 +124,7 @@ EXPORT_SYMBOL_GPL(snd_soc_dai_set_pll);
  */
 int snd_soc_dai_set_bclk_ratio(struct snd_soc_dai *dai, unsigned int ratio)
 {
-	int ret = -ENOTSUPP;
+	int ret = -EINVAL;
 
 	if (dai->driver->ops &&
 	    dai->driver->ops->set_bclk_ratio)

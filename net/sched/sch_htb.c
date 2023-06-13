@@ -427,10 +427,7 @@ static void htb_activate_prios(struct htb_sched *q, struct htb_class *cl)
 	while (cl->cmode == HTB_MAY_BORROW && p && mask) {
 		m = mask;
 		while (m) {
-			unsigned int prio = ffz(~m);
-
-			if (WARN_ON_ONCE(prio >= ARRAY_SIZE(p->inner.clprio)))
-				break;
+			int prio = ffz(~m);
 			m &= ~(1 << prio);
 
 			if (p->inner.clprio[prio].feed.rb_node)
@@ -1105,7 +1102,9 @@ static int htb_init(struct Qdisc *sch, struct nlattr *opt,
 
 	err = qdisc_class_hash_init(&q->clhash);
 	if (err < 0)
-		return err;
+		goto err_free_direct_qdiscs;
+
+	qdisc_skb_head_init(&q->direct_queue);
 
 	if (tb[TCA_HTB_DIRECT_QLEN])
 		q->direct_qlen = nla_get_u32(tb[TCA_HTB_DIRECT_QLEN]);
@@ -1126,7 +1125,8 @@ static int htb_init(struct Qdisc *sch, struct nlattr *opt,
 		qdisc = qdisc_create_dflt(dev_queue, &pfifo_qdisc_ops,
 					  TC_H_MAKE(sch->handle, 0), extack);
 		if (!qdisc) {
-			return -ENOMEM;
+			err = -ENOMEM;
+			goto err_free_qdiscs;
 		}
 
 		htb_set_lockdep_class_child(qdisc);
@@ -1144,7 +1144,7 @@ static int htb_init(struct Qdisc *sch, struct nlattr *opt,
 	};
 	err = htb_offload(dev, &offload_opt);
 	if (err)
-		return err;
+		goto err_free_qdiscs;
 
 	/* Defer this assignment, so that htb_destroy skips offload-related
 	 * parts (especially calling ndo_setup_tc) on errors.
@@ -1152,6 +1152,22 @@ static int htb_init(struct Qdisc *sch, struct nlattr *opt,
 	q->offload = true;
 
 	return 0;
+
+err_free_qdiscs:
+	for (ntx = 0; ntx < q->num_direct_qdiscs && q->direct_qdiscs[ntx];
+	     ntx++)
+		qdisc_put(q->direct_qdiscs[ntx]);
+
+	qdisc_class_hash_destroy(&q->clhash);
+	/* Prevent use-after-free and double-free when htb_destroy gets called.
+	 */
+	q->clhash.hash = NULL;
+	q->clhash.hashsize = 0;
+
+err_free_direct_qdiscs:
+	kfree(q->direct_qdiscs);
+	q->direct_qdiscs = NULL;
+	return err;
 }
 
 static void htb_attach_offload(struct Qdisc *sch)
@@ -1548,7 +1564,7 @@ static int htb_destroy_class_offload(struct Qdisc *sch, struct htb_class *cl,
 	struct tc_htb_qopt_offload offload_opt;
 	struct netdev_queue *dev_queue;
 	struct Qdisc *q = cl->leaf.q;
-	struct Qdisc *old;
+	struct Qdisc *old = NULL;
 	int err;
 
 	if (cl->level)
@@ -1556,17 +1572,14 @@ static int htb_destroy_class_offload(struct Qdisc *sch, struct htb_class *cl,
 
 	WARN_ON(!q);
 	dev_queue = htb_offload_get_queue(cl);
-	/* When destroying, caller qdisc_graft grafts the new qdisc and invokes
-	 * qdisc_put for the qdisc being destroyed. htb_destroy_class_offload
-	 * does not need to graft or qdisc_put the qdisc being destroyed.
-	 */
-	if (!destroying) {
-		old = htb_graft_helper(dev_queue, NULL);
-		/* Last qdisc grafted should be the same as cl->leaf.q when
-		 * calling htb_delete.
+	old = htb_graft_helper(dev_queue, NULL);
+	if (destroying)
+		/* Before HTB is destroyed, the kernel grafts noop_qdisc to
+		 * all queues.
 		 */
+		WARN_ON(!(old->flags & TCQ_F_BUILTIN));
+	else
 		WARN_ON(old != q);
-	}
 
 	if (cl->parent) {
 		_bstats_update(&cl->parent->bstats_bias,
@@ -1583,12 +1596,10 @@ static int htb_destroy_class_offload(struct Qdisc *sch, struct htb_class *cl,
 	};
 	err = htb_offload(qdisc_dev(sch), &offload_opt);
 
-	if (!destroying) {
-		if (!err)
-			qdisc_put(old);
-		else
-			htb_graft_helper(dev_queue, old);
-	}
+	if (!err || destroying)
+		qdisc_put(old);
+	else
+		htb_graft_helper(dev_queue, old);
 
 	if (last_child)
 		return err;
@@ -1679,12 +1690,13 @@ static void htb_destroy(struct Qdisc *sch)
 	qdisc_class_hash_destroy(&q->clhash);
 	__qdisc_reset_queue(&q->direct_queue);
 
-	if (q->offload) {
-		offload_opt = (struct tc_htb_qopt_offload) {
-			.command = TC_HTB_DESTROY,
-		};
-		htb_offload(dev, &offload_opt);
-	}
+	if (!q->offload)
+		return;
+
+	offload_opt = (struct tc_htb_qopt_offload) {
+		.command = TC_HTB_DESTROY,
+	};
+	htb_offload(dev, &offload_opt);
 
 	if (!q->direct_qdiscs)
 		return;
@@ -2127,8 +2139,15 @@ static void htb_walk(struct Qdisc *sch, struct qdisc_walker *arg)
 
 	for (i = 0; i < q->clhash.hashsize; i++) {
 		hlist_for_each_entry(cl, &q->clhash.hash[i], common.hnode) {
-			if (!tc_qdisc_stats_dump(sch, (unsigned long)cl, arg))
+			if (arg->count < arg->skip) {
+				arg->count++;
+				continue;
+			}
+			if (arg->fn(sch, (unsigned long)cl, arg) < 0) {
+				arg->stop = 1;
 				return;
+			}
+			arg->count++;
 		}
 	}
 }

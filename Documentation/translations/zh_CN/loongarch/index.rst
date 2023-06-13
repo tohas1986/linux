@@ -14,7 +14,6 @@ LoongArch体系结构
    :numbered:
 
    introduction
-   booting
    irq-chip-model
 
    features

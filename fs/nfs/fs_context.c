@@ -273,9 +273,9 @@ static const struct constant_table nfs_secflavor_tokens[] = {
  * Address family must be initialized, and address must not be
  * the ANY address for that family.
  */
-static int nfs_verify_server_address(struct sockaddr_storage *addr)
+static int nfs_verify_server_address(struct sockaddr *addr)
 {
-	switch (addr->ss_family) {
+	switch (addr->sa_family) {
 	case AF_INET: {
 		struct sockaddr_in *sa = (struct sockaddr_in *)addr;
 		return sa->sin_addr.s_addr != htonl(INADDR_ANY);
@@ -684,8 +684,6 @@ static int nfs_fs_context_parse_param(struct fs_context *fc,
 			return ret;
 		break;
 	case Opt_vers:
-		if (!param->string)
-			goto out_invalid_value;
 		trace_nfs_mount_assign(param->key, param->string);
 		ret = nfs_parse_version_string(fc, param->string);
 		if (ret < 0)
@@ -698,8 +696,6 @@ static int nfs_fs_context_parse_param(struct fs_context *fc,
 		break;
 
 	case Opt_proto:
-		if (!param->string)
-			goto out_invalid_value;
 		trace_nfs_mount_assign(param->key, param->string);
 		protofamily = AF_INET;
 		switch (lookup_constant(nfs_xprt_protocol_tokens, param->string, -1)) {
@@ -736,8 +732,6 @@ static int nfs_fs_context_parse_param(struct fs_context *fc,
 		break;
 
 	case Opt_mountproto:
-		if (!param->string)
-			goto out_invalid_value;
 		trace_nfs_mount_assign(param->key, param->string);
 		mountfamily = AF_INET;
 		switch (lookup_constant(nfs_xprt_protocol_tokens, param->string, -1)) {
@@ -975,7 +969,7 @@ static int nfs23_parse_monolithic(struct fs_context *fc,
 {
 	struct nfs_fs_context *ctx = nfs_fc2context(fc);
 	struct nfs_fh *mntfh = ctx->mntfh;
-	struct sockaddr_storage *sap = &ctx->nfs_server._address;
+	struct sockaddr *sap = (struct sockaddr *)&ctx->nfs_server.address;
 	int extra_flags = NFS_MOUNT_LEGACY_INTERFACE;
 	int ret;
 
@@ -1050,7 +1044,7 @@ static int nfs23_parse_monolithic(struct fs_context *fc,
 		memcpy(sap, &data->addr, sizeof(data->addr));
 		ctx->nfs_server.addrlen = sizeof(data->addr);
 		ctx->nfs_server.port = ntohs(data->addr.sin_port);
-		if (sap->ss_family != AF_INET ||
+		if (sap->sa_family != AF_INET ||
 		    !nfs_verify_server_address(sap))
 			goto out_no_address;
 
@@ -1206,7 +1200,7 @@ static int nfs4_parse_monolithic(struct fs_context *fc,
 				 struct nfs4_mount_data *data)
 {
 	struct nfs_fs_context *ctx = nfs_fc2context(fc);
-	struct sockaddr_storage *sap = &ctx->nfs_server._address;
+	struct sockaddr *sap = (struct sockaddr *)&ctx->nfs_server.address;
 	int ret;
 	char *c;
 
@@ -1320,7 +1314,7 @@ static int nfs_fs_context_validate(struct fs_context *fc)
 {
 	struct nfs_fs_context *ctx = nfs_fc2context(fc);
 	struct nfs_subversion *nfs_mod;
-	struct sockaddr_storage *sap = &ctx->nfs_server._address;
+	struct sockaddr *sap = (struct sockaddr *)&ctx->nfs_server.address;
 	int max_namelen = PAGE_SIZE;
 	int max_pathlen = NFS_MAXPATHLEN;
 	int port = 0;
@@ -1546,7 +1540,7 @@ static int nfs_init_fs_context(struct fs_context *fc)
 		ctx->version		= nfss->nfs_client->rpc_ops->version;
 		ctx->minorversion	= nfss->nfs_client->cl_minorversion;
 
-		memcpy(&ctx->nfs_server._address, &nfss->nfs_client->cl_addr,
+		memcpy(&ctx->nfs_server.address, &nfss->nfs_client->cl_addr,
 			ctx->nfs_server.addrlen);
 
 		if (fc->net_ns != net) {

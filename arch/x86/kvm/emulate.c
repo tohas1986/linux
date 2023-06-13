@@ -1166,11 +1166,9 @@ static int em_fnstsw(struct x86_emulate_ctxt *ctxt)
 static void decode_register_operand(struct x86_emulate_ctxt *ctxt,
 				    struct operand *op)
 {
-	unsigned int reg;
+	unsigned reg = ctxt->modrm_reg;
 
-	if (ctxt->d & ModRM)
-		reg = ctxt->modrm_reg;
-	else
+	if (!(ctxt->d & ModRM))
 		reg = (ctxt->b & 7) | ((ctxt->rex_prefix & 1) << 3);
 
 	if (ctxt->d & Sse) {
@@ -3691,10 +3689,13 @@ static int em_wrmsr(struct x86_emulate_ctxt *ctxt)
 		| ((u64)reg_read(ctxt, VCPU_REGS_RDX) << 32);
 	r = ctxt->ops->set_msr_with_filter(ctxt, msr_index, msr_data);
 
-	if (r == X86EMUL_PROPAGATE_FAULT)
+	if (r == X86EMUL_IO_NEEDED)
+		return r;
+
+	if (r > 0)
 		return emulate_gp(ctxt, 0);
 
-	return r;
+	return r < 0 ? X86EMUL_UNHANDLEABLE : X86EMUL_CONTINUE;
 }
 
 static int em_rdmsr(struct x86_emulate_ctxt *ctxt)
@@ -3705,14 +3706,15 @@ static int em_rdmsr(struct x86_emulate_ctxt *ctxt)
 
 	r = ctxt->ops->get_msr_with_filter(ctxt, msr_index, &msr_data);
 
-	if (r == X86EMUL_PROPAGATE_FAULT)
+	if (r == X86EMUL_IO_NEEDED)
+		return r;
+
+	if (r)
 		return emulate_gp(ctxt, 0);
 
-	if (r == X86EMUL_CONTINUE) {
-		*reg_write(ctxt, VCPU_REGS_RAX) = (u32)msr_data;
-		*reg_write(ctxt, VCPU_REGS_RDX) = msr_data >> 32;
-	}
-	return r;
+	*reg_write(ctxt, VCPU_REGS_RAX) = (u32)msr_data;
+	*reg_write(ctxt, VCPU_REGS_RDX) = msr_data >> 32;
+	return X86EMUL_CONTINUE;
 }
 
 static int em_store_sreg(struct x86_emulate_ctxt *ctxt, int segment)
@@ -4213,7 +4215,8 @@ static int check_dr7_gd(struct x86_emulate_ctxt *ctxt)
 
 	ctxt->ops->get_dr(ctxt, 7, &dr7);
 
-	return dr7 & DR7_GD;
+	/* Check if DR7.Global_Enable is set */
+	return dr7 & (1 << 13);
 }
 
 static int check_dr_read(struct x86_emulate_ctxt *ctxt)

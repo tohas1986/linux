@@ -14,8 +14,6 @@ properties:
     enum:
       - qcom,sc7280-lpass-tx-macro
       - qcom,sm8250-lpass-tx-macro
-      - qcom,sm8450-lpass-tx-macro
-      - qcom,sc8280xp-lpass-tx-macro
 
   reg:
     maxItems: 1

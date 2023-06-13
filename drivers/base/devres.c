@@ -117,9 +117,7 @@ static __always_inline struct devres * alloc_dr(dr_release_t release,
 	if (unlikely(!dr))
 		return NULL;
 
-	/* No need to clear memory twice */
-	if (!(gfp & __GFP_ZERO))
-		memset(dr, 0, offsetof(struct devres, data));
+	memset(dr, 0, offsetof(struct devres, data));
 
 	INIT_LIST_HEAD(&dr->node.entry);
 	dr->node.release = release;

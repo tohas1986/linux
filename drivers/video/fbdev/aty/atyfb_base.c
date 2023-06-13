@@ -48,7 +48,6 @@
 
 ******************************************************************************/
 
-#include <linux/aperture.h>
 #include <linux/compat.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
@@ -3534,11 +3533,7 @@ static int atyfb_pci_probe(struct pci_dev *pdev,
 	struct fb_info *info;
 	struct resource *rp;
 	struct atyfb_par *par;
-	int rc;
-
-	rc = aperture_remove_conflicting_pci_devices(pdev, "atyfb");
-	if (rc)
-		return rc;
+	int rc = -ENOMEM;
 
 	/* Enable device in PCI config */
 	if (pci_enable_device(pdev)) {

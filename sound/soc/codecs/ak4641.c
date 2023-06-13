@@ -604,7 +604,7 @@ err_out:
 	return ret;
 }
 
-static void ak4641_i2c_remove(struct i2c_client *i2c)
+static int ak4641_i2c_remove(struct i2c_client *i2c)
 {
 	struct ak4641_platform_data *pdata = i2c->dev.platform_data;
 
@@ -616,6 +616,8 @@ static void ak4641_i2c_remove(struct i2c_client *i2c)
 		if (gpio_is_valid(pdata->gpio_npdn))
 			gpio_free(pdata->gpio_npdn);
 	}
+
+	return 0;
 }
 
 static const struct i2c_device_id ak4641_i2c_id[] = {

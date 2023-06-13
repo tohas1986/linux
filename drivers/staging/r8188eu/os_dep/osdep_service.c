@@ -5,6 +5,7 @@
 
 #include "../include/osdep_service.h"
 #include "../include/drv_types.h"
+#include "../include/recv_osdep.h"
 #include "../include/rtw_ioctl_set.h"
 
 /*
@@ -53,13 +54,14 @@ struct net_device *rtw_alloc_etherdev_with_old_priv(int sizeof_priv,
 
 	pnetdev = alloc_etherdev_mq(sizeof(struct rtw_netdev_priv_indicator), 4);
 	if (!pnetdev)
-		return NULL;
+		goto RETURN;
 
 	pnetdev->dev.type = &wlan_type;
 	pnpi = netdev_priv(pnetdev);
 	pnpi->priv = old_priv;
 	pnpi->sizeof_priv = sizeof_priv;
 
+RETURN:
 	return pnetdev;
 }
 
@@ -70,18 +72,19 @@ struct net_device *rtw_alloc_etherdev(int sizeof_priv)
 
 	pnetdev = alloc_etherdev_mq(sizeof(struct rtw_netdev_priv_indicator), 4);
 	if (!pnetdev)
-		return NULL;
+		goto RETURN;
 
 	pnpi = netdev_priv(pnetdev);
 
 	pnpi->priv = vzalloc(sizeof_priv);
 	if (!pnpi->priv) {
 		free_netdev(pnetdev);
-		return NULL;
+		pnetdev = NULL;
+		goto RETURN;
 	}
 
 	pnpi->sizeof_priv = sizeof_priv;
-
+RETURN:
 	return pnetdev;
 }
 

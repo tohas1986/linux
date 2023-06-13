@@ -1603,12 +1603,12 @@ mv643xx_eth_set_link_ksettings(struct net_device *dev,
 static void mv643xx_eth_get_drvinfo(struct net_device *dev,
 				    struct ethtool_drvinfo *drvinfo)
 {
-	strscpy(drvinfo->driver, mv643xx_eth_driver_name,
+	strlcpy(drvinfo->driver, mv643xx_eth_driver_name,
 		sizeof(drvinfo->driver));
-	strscpy(drvinfo->version, mv643xx_eth_driver_version,
+	strlcpy(drvinfo->version, mv643xx_eth_driver_version,
 		sizeof(drvinfo->version));
-	strscpy(drvinfo->fw_version, "N/A", sizeof(drvinfo->fw_version));
-	strscpy(drvinfo->bus_info, "platform", sizeof(drvinfo->bus_info));
+	strlcpy(drvinfo->fw_version, "N/A", sizeof(drvinfo->fw_version));
+	strlcpy(drvinfo->bus_info, "platform", sizeof(drvinfo->bus_info));
 }
 
 static int mv643xx_eth_get_coalesce(struct net_device *dev,
@@ -3184,7 +3184,7 @@ static int mv643xx_eth_probe(struct platform_device *pdev)
 
 	INIT_WORK(&mp->tx_timeout_task, tx_timeout_task);
 
-	netif_napi_add(dev, &mp->napi, mv643xx_eth_poll);
+	netif_napi_add(dev, &mp->napi, mv643xx_eth_poll, NAPI_POLL_WEIGHT);
 
 	timer_setup(&mp->rx_oom, oom_timer_wrapper, 0);
 

@@ -880,7 +880,7 @@ error_disable_reg:
 	return ret;
 }
 
-static void ad799x_remove(struct i2c_client *client)
+static int ad799x_remove(struct i2c_client *client)
 {
 	struct iio_dev *indio_dev = i2c_get_clientdata(client);
 	struct ad799x_state *st = iio_priv(indio_dev);
@@ -892,6 +892,8 @@ static void ad799x_remove(struct i2c_client *client)
 		regulator_disable(st->vref);
 	regulator_disable(st->reg);
 	kfree(st->rx_buf);
+
+	return 0;
 }
 
 static int ad799x_suspend(struct device *dev)

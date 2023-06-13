@@ -41,6 +41,8 @@
 #define ASPEED_CLK_24M			35
 #define ASPEED_CLK_MAC1RCLK		36
 #define ASPEED_CLK_MAC2RCLK		37
+#define ASPEED_CLK_UART_HS		38
+#define ASPEED_CLK_MAX			39
 
 #define ASPEED_RESET_XDMA		0
 #define ASPEED_RESET_MCTP		1
@@ -52,6 +54,5 @@
 #define ASPEED_RESET_I2C		7
 #define ASPEED_RESET_AHB		8
 #define ASPEED_RESET_CRT1		9
-#define ASPEED_RESET_HACE		10
 
 #endif

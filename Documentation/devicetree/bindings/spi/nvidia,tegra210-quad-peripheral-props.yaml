@@ -29,4 +29,5 @@ properties:
     minimum: 0
     maximum: 255
 
-additionalProperties: true
+unevaluatedProperties: true
+

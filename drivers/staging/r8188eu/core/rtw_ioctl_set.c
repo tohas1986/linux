@@ -11,6 +11,8 @@
 #include "../include/usb_osintf.h"
 #include "../include/usb_ops.h"
 
+extern void indicate_wx_scan_complete_event(struct adapter *padapter);
+
 u8 rtw_do_join(struct adapter *padapter)
 {
 	struct list_head *plist, *phead;
@@ -41,7 +43,7 @@ u8 rtw_do_join(struct adapter *padapter)
 		if (!pmlmepriv->LinkDetectInfo.bBusyTraffic ||
 		    pmlmepriv->to_roaming > 0) {
 			/*  submit site_survey_cmd */
-			ret = rtw_sitesurvey_cmd(padapter, &pmlmepriv->assoc_ssid, 1);
+			ret = rtw_sitesurvey_cmd(padapter, &pmlmepriv->assoc_ssid, 1, NULL, 0);
 			if (ret != _SUCCESS)
 				pmlmepriv->to_join = false;
 		} else {
@@ -87,7 +89,7 @@ u8 rtw_do_join(struct adapter *padapter)
 				/* we try to issue sitesurvey firstly */
 				if (!pmlmepriv->LinkDetectInfo.bBusyTraffic ||
 				    pmlmepriv->to_roaming > 0) {
-					ret = rtw_sitesurvey_cmd(padapter, &pmlmepriv->assoc_ssid, 1);
+					ret = rtw_sitesurvey_cmd(padapter, &pmlmepriv->assoc_ssid, 1, NULL, 0);
 					if (ret != _SUCCESS)
 						pmlmepriv->to_join = false;
 				} else {
@@ -351,9 +353,14 @@ u8 rtw_set_802_11_bssid_list_scan(struct adapter *padapter, struct ndis_802_11_s
 		/*  Scan or linking is in progress, do nothing. */
 		res = true;
 	} else {
+		if (rtw_is_scan_deny(padapter)) {
+			indicate_wx_scan_complete_event(padapter);
+			return _SUCCESS;
+		}
+
 		spin_lock_bh(&pmlmepriv->lock);
 
-		res = rtw_sitesurvey_cmd(padapter, pssid, ssid_max_num);
+		res = rtw_sitesurvey_cmd(padapter, pssid, ssid_max_num, NULL, 0);
 
 		spin_unlock_bh(&pmlmepriv->lock);
 	}

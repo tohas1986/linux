@@ -138,7 +138,6 @@
 #define PM_CLK_AO			BIT(15)
 #define IFA_IOMMU_PCIE_SUPPORT		BIT(16)
 #define PGTABLE_PA_35_EN		BIT(17)
-#define TF_PORT_TO_ADDR_MT8173		BIT(18)
 
 #define MTK_IOMMU_HAS_FLAG_MASK(pdata, _x, mask)	\
 				((((pdata)->flags) & (mask)) == (_x))
@@ -158,7 +157,6 @@
 enum mtk_iommu_plat {
 	M4U_MT2712,
 	M4U_MT6779,
-	M4U_MT6795,
 	M4U_MT8167,
 	M4U_MT8173,
 	M4U_MT8183,
@@ -454,7 +452,7 @@ static irqreturn_t mtk_iommu_isr(int irq, void *dev_id)
 		fault_larb = data->plat_data->larbid_remap[fault_larb][sub_comm];
 	}
 
-	if (!dom || report_iommu_fault(&dom->domain, bank->parent_dev, fault_iova,
+	if (report_iommu_fault(&dom->domain, bank->parent_dev, fault_iova,
 			       write ? IOMMU_FAULT_WRITE : IOMMU_FAULT_READ)) {
 		dev_err_ratelimited(
 			bank->parent_dev,
@@ -917,8 +915,7 @@ static void mtk_iommu_get_resv_regions(struct device *dev,
 			continue;
 
 		region = iommu_alloc_resv_region(resv->iova_base, resv->size,
-						 prot, IOMMU_RESV_RESERVED,
-						 GFP_KERNEL);
+						 prot, IOMMU_RESV_RESERVED);
 		if (!region)
 			return;
 
@@ -958,7 +955,7 @@ static int mtk_iommu_hw_init(const struct mtk_iommu_data *data, unsigned int ban
 	 * Global control settings are in bank0. May re-init these global registers
 	 * since no sure if there is bank0 consumers.
 	 */
-	if (MTK_IOMMU_HAS_FLAG(data->plat_data, TF_PORT_TO_ADDR_MT8173)) {
+	if (data->plat_data->m4u_plat == M4U_MT8173) {
 		regval = F_MMU_PREFETCH_RT_REPLACE_MOD |
 			 F_MMU_TF_PROT_TO_PROGRAM_ADDR_MT8173;
 	} else {
@@ -1044,24 +1041,20 @@ static int mtk_iommu_mm_dts_parse(struct device *dev, struct component_match **m
 				  struct mtk_iommu_data *data)
 {
 	struct device_node *larbnode, *smicomm_node, *smi_subcomm_node;
-	struct platform_device *plarbdev, *pcommdev;
+	struct platform_device *plarbdev;
 	struct device_link *link;
 	int i, larb_nr, ret;
 
 	larb_nr = of_count_phandle_with_args(dev->of_node, "mediatek,larbs", NULL);
 	if (larb_nr < 0)
 		return larb_nr;
-	if (larb_nr == 0 || larb_nr > MTK_LARB_NR_MAX)
-		return -EINVAL;
 
 	for (i = 0; i < larb_nr; i++) {
 		u32 id;
 
 		larbnode = of_parse_phandle(dev->of_node, "mediatek,larbs", i);
-		if (!larbnode) {
-			ret = -EINVAL;
-			goto err_larbdev_put;
-		}
+		if (!larbnode)
+			return -EINVAL;
 
 		if (!of_device_is_available(larbnode)) {
 			of_node_put(larbnode);
@@ -1071,32 +1064,20 @@ static int mtk_iommu_mm_dts_parse(struct device *dev, struct component_match **m
 		ret = of_property_read_u32(larbnode, "mediatek,larb-id", &id);
 		if (ret)/* The id is consecutive if there is no this property */
 			id = i;
-		if (id >= MTK_LARB_NR_MAX) {
-			of_node_put(larbnode);
-			ret = -EINVAL;
-			goto err_larbdev_put;
-		}
 
 		plarbdev = of_find_device_by_node(larbnode);
-		of_node_put(larbnode);
 		if (!plarbdev) {
-			ret = -ENODEV;
-			goto err_larbdev_put;
+			of_node_put(larbnode);
+			return -ENODEV;
 		}
-		if (data->larb_imu[id].dev) {
-			platform_device_put(plarbdev);
-			ret = -EEXIST;
-			goto err_larbdev_put;
+		if (!plarbdev->dev.driver) {
+			of_node_put(larbnode);
+			return -EPROBE_DEFER;
 		}
 		data->larb_imu[id].dev = &plarbdev->dev;
 
-		if (!plarbdev->dev.driver) {
-			ret = -EPROBE_DEFER;
-			goto err_larbdev_put;
-		}
-
-		component_match_add(dev, match, component_compare_dev, &plarbdev->dev);
-		platform_device_put(plarbdev);
+		component_match_add_release(dev, match, component_release_of,
+					    component_compare_of, larbnode);
 	}
 
 	/* Get smi-(sub)-common dev from the last larb. */
@@ -1114,28 +1095,17 @@ static int mtk_iommu_mm_dts_parse(struct device *dev, struct component_match **m
 	else
 		smicomm_node = smi_subcomm_node;
 
-	pcommdev = of_find_device_by_node(smicomm_node);
+	plarbdev = of_find_device_by_node(smicomm_node);
 	of_node_put(smicomm_node);
-	if (!pcommdev)
-		return -ENODEV;
-	data->smicomm_dev = &pcommdev->dev;
+	data->smicomm_dev = &plarbdev->dev;
 
 	link = device_link_add(data->smicomm_dev, dev,
 			       DL_FLAG_STATELESS | DL_FLAG_PM_RUNTIME);
-	platform_device_put(pcommdev);
 	if (!link) {
 		dev_err(dev, "Unable to link %s.\n", dev_name(data->smicomm_dev));
 		return -EINVAL;
 	}
 	return 0;
-
-err_larbdev_put:
-	for (i = MTK_LARB_NR_MAX - 1; i >= 0; i--) {
-		if (!data->larb_imu[i].dev)
-			continue;
-		put_device(data->larb_imu[i].dev);
-	}
-	return ret;
 }
 
 static int mtk_iommu_probe(struct platform_device *pdev)
@@ -1200,8 +1170,6 @@ static int mtk_iommu_probe(struct platform_device *pdev)
 
 	banks_num = data->plat_data->banks_num;
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	if (!res)
-		return -EINVAL;
 	if (resource_size(res) < banks_num * MTK_IOMMU_BANK_SZ) {
 		dev_err(dev, "banknr %d. res %pR is not enough.\n", banks_num, res);
 		return -EINVAL;
@@ -1275,13 +1243,30 @@ static int mtk_iommu_probe(struct platform_device *pdev)
 		data->hw_list = &data->hw_list_head;
 	}
 
-	if (MTK_IOMMU_IS_TYPE(data->plat_data, MTK_IOMMU_TYPE_MM)) {
-		ret = component_master_add_with_match(dev, &mtk_iommu_com_ops, match);
+	if (!iommu_present(&platform_bus_type)) {
+		ret = bus_set_iommu(&platform_bus_type, &mtk_iommu_ops);
 		if (ret)
 			goto out_list_del;
 	}
+
+	if (MTK_IOMMU_IS_TYPE(data->plat_data, MTK_IOMMU_TYPE_MM)) {
+		ret = component_master_add_with_match(dev, &mtk_iommu_com_ops, match);
+		if (ret)
+			goto out_bus_set_null;
+	} else if (MTK_IOMMU_IS_TYPE(data->plat_data, MTK_IOMMU_TYPE_INFRA) &&
+		   MTK_IOMMU_HAS_FLAG(data->plat_data, IFA_IOMMU_PCIE_SUPPORT)) {
+#ifdef CONFIG_PCI
+		if (!iommu_present(&pci_bus_type)) {
+			ret = bus_set_iommu(&pci_bus_type, &mtk_iommu_ops);
+			if (ret) /* PCIe fail don't affect platform_bus. */
+				goto out_list_del;
+		}
+#endif
+	}
 	return ret;
 
+out_bus_set_null:
+	bus_set_iommu(&platform_bus_type, NULL);
 out_list_del:
 	list_del(&data->list);
 	iommu_device_unregister(&data->iommu);
@@ -1309,6 +1294,11 @@ static int mtk_iommu_remove(struct platform_device *pdev)
 	if (MTK_IOMMU_IS_TYPE(data->plat_data, MTK_IOMMU_TYPE_MM)) {
 		device_link_remove(data->smicomm_dev, &pdev->dev);
 		component_master_del(&pdev->dev, &mtk_iommu_com_ops);
+	} else if (MTK_IOMMU_IS_TYPE(data->plat_data, MTK_IOMMU_TYPE_INFRA) &&
+		   MTK_IOMMU_HAS_FLAG(data->plat_data, IFA_IOMMU_PCIE_SUPPORT)) {
+#ifdef CONFIG_PCI
+		bus_set_iommu(&pci_bus_type, NULL);
+#endif
 	}
 	pm_runtime_disable(&pdev->dev);
 	for (i = 0; i < data->plat_data->banks_num; i++) {
@@ -1423,19 +1413,6 @@ static const struct mtk_iommu_plat_data mt6779_data = {
 	.larbid_remap  = {{0}, {1}, {2}, {3}, {5}, {7, 8}, {10}, {9}},
 };
 
-static const struct mtk_iommu_plat_data mt6795_data = {
-	.m4u_plat     = M4U_MT6795,
-	.flags	      = HAS_4GB_MODE | HAS_BCLK | RESET_AXI |
-			HAS_LEGACY_IVRP_PADDR | MTK_IOMMU_TYPE_MM |
-			TF_PORT_TO_ADDR_MT8173,
-	.inv_sel_reg  = REG_MMU_INV_SEL_GEN1,
-	.banks_num    = 1,
-	.banks_enable = {true},
-	.iova_region  = single_domain,
-	.iova_region_nr = ARRAY_SIZE(single_domain),
-	.larbid_remap = {{0}, {1}, {2}, {3}, {4}}, /* Linear mapping. */
-};
-
 static const struct mtk_iommu_plat_data mt8167_data = {
 	.m4u_plat     = M4U_MT8167,
 	.flags        = RESET_AXI | HAS_LEGACY_IVRP_PADDR | MTK_IOMMU_TYPE_MM,
@@ -1450,8 +1427,7 @@ static const struct mtk_iommu_plat_data mt8167_data = {
 static const struct mtk_iommu_plat_data mt8173_data = {
 	.m4u_plat     = M4U_MT8173,
 	.flags	      = HAS_4GB_MODE | HAS_BCLK | RESET_AXI |
-			HAS_LEGACY_IVRP_PADDR | MTK_IOMMU_TYPE_MM |
-			TF_PORT_TO_ADDR_MT8173,
+			HAS_LEGACY_IVRP_PADDR | MTK_IOMMU_TYPE_MM,
 	.inv_sel_reg  = REG_MMU_INV_SEL_GEN1,
 	.banks_num    = 1,
 	.banks_enable = {true},
@@ -1548,7 +1524,6 @@ static const struct mtk_iommu_plat_data mt8195_data_vpp = {
 static const struct of_device_id mtk_iommu_of_ids[] = {
 	{ .compatible = "mediatek,mt2712-m4u", .data = &mt2712_data},
 	{ .compatible = "mediatek,mt6779-m4u", .data = &mt6779_data},
-	{ .compatible = "mediatek,mt6795-m4u", .data = &mt6795_data},
 	{ .compatible = "mediatek,mt8167-m4u", .data = &mt8167_data},
 	{ .compatible = "mediatek,mt8173-m4u", .data = &mt8173_data},
 	{ .compatible = "mediatek,mt8183-m4u", .data = &mt8183_data},

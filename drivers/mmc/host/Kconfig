@@ -157,7 +157,6 @@ config MMC_SDHCI_OF_ARASAN
 
 config MMC_SDHCI_OF_ASPEED
 	tristate "SDHCI OF support for the ASPEED SDHCI controller"
-	depends on ARCH_ASPEED || COMPILE_TEST
 	depends on MMC_SDHCI_PLTFM
 	depends on OF && OF_ADDRESS
 	select MMC_SDHCI_IO_ACCESSORS
@@ -414,14 +413,6 @@ config MMC_SDHCI_MILBEAUT
 	  If you have a controller with this interface, say Y or M here.
 
 	  If unsure, say N.
-
-config MMC_SDHCI_NPCM
-	tristate "Secure Digital Host Controller Interface support for NPCM"
-	depends on ARCH_NPCM || COMPILE_TEST
-	depends on MMC_SDHCI_PLTFM
-	help
-	  This provides support for the SD/eMMC controller found in
-	  NPCM BMC family SoCs.
 
 config MMC_SDHCI_IPROC
 	tristate "SDHCI support for the BCM2835 & iProc SD/MMC Controller"

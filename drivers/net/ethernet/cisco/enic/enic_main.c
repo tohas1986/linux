@@ -2633,17 +2633,16 @@ static int enic_dev_init(struct enic *enic)
 
 	switch (vnic_dev_get_intr_mode(enic->vdev)) {
 	default:
-		netif_napi_add(netdev, &enic->napi[0], enic_poll);
+		netif_napi_add(netdev, &enic->napi[0], enic_poll, 64);
 		break;
 	case VNIC_DEV_INTR_MODE_MSIX:
 		for (i = 0; i < enic->rq_count; i++) {
 			netif_napi_add(netdev, &enic->napi[i],
-				       enic_poll_msix_rq);
+				enic_poll_msix_rq, NAPI_POLL_WEIGHT);
 		}
 		for (i = 0; i < enic->wq_count; i++)
-			netif_napi_add(netdev,
-				       &enic->napi[enic_cq_wq(enic, i)],
-				       enic_poll_msix_wq);
+			netif_napi_add(netdev, &enic->napi[enic_cq_wq(enic, i)],
+				       enic_poll_msix_wq, NAPI_POLL_WEIGHT);
 		break;
 	}
 

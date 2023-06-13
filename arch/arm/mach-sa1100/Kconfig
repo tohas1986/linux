@@ -1,25 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0-only
-menuconfig ARCH_SA1100
-	bool "SA11x0 Implementations"
-	depends on ARCH_MULTI_V4 && !(ARCH_MULTI_V4T || ARCH_MULTI_V5)
-	depends on !(ARCH_MOXART || ARCH_GEMINI)
-	depends on ATAGS
-	depends on CPU_LITTLE_ENDIAN
-	depends on MMU
-	select ARCH_NO_SG_CHAIN
-	select ARCH_MTD_XIP
-	select CLKSRC_MMIO
-	select CLKSRC_PXA
-	select CPU_FREQ
-	select CPU_SA1100
-	select GPIOLIB
-	select IRQ_DOMAIN
-	select ISA
-	select NEED_MACH_MEMORY_H
-	help
-	  Support for StrongARM 11x0 based boards.
-
 if ARCH_SA1100
+
+menu "SA11x0 Implementations"
 
 config SA1100_ASSABET
 	bool "Assabet"
@@ -197,4 +179,7 @@ config SA1100_SSP
 	  This isn't for audio support, but for attached sensors and
 	  other devices, eg for BadgePAD 4 sensor support.
 
+endmenu
+
 endif
+

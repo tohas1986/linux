@@ -719,13 +719,24 @@ static int show_object(struct seq_file *seq, void *v)
 	return 0;
 }
 
-static const struct seq_operations objects_sops = {
+static const struct seq_operations object_seqops = {
 	.start = start_object,
 	.next = next_object,
 	.stop = stop_object,
 	.show = show_object,
 };
-DEFINE_SEQ_ATTRIBUTE(objects);
+
+static int open_objects(struct inode *inode, struct file *file)
+{
+	return seq_open(file, &object_seqops);
+}
+
+static const struct file_operations objects_fops = {
+	.open = open_objects,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = seq_release,
+};
 
 static int __init kfence_debugfs_init(void)
 {
@@ -853,7 +864,7 @@ static void kfence_init_enable(void)
 
 void __init kfence_init(void)
 {
-	stack_hash_seed = get_random_u32();
+	stack_hash_seed = (u32)random_get_entropy();
 
 	/* Setting kfence_sample_interval to 0 on boot disables KFENCE. */
 	if (!kfence_sample_interval)
@@ -991,13 +1002,6 @@ void *__kfence_alloc(struct kmem_cache *s, size_t size, gfp_t flags)
 		atomic_long_inc(&counters[KFENCE_COUNTER_SKIP_INCOMPAT]);
 		return NULL;
 	}
-
-	/*
-	 * Skip allocations for this slab, if KFENCE has been disabled for
-	 * this slab.
-	 */
-	if (s->flags & SLAB_SKIP_KFENCE)
-		return NULL;
 
 	if (atomic_inc_return(&kfence_allocation_gate) > 1)
 		return NULL;

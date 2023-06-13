@@ -13,7 +13,6 @@
 #include <linux/delay.h>
 #include <linux/err.h>
 #include <linux/gpio.h>
-#include <linux/gpio/consumer.h>
 #include <linux/interrupt.h>
 #include <linux/mfd/syscon.h>
 #include <linux/of_address.h>
@@ -367,11 +366,12 @@ static int kirin_pcie_get_gpio_enable(struct kirin_pcie *pcie,
 				      struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
+	struct device_node *np = dev->of_node;
 	char name[32];
 	int ret, i;
 
 	/* This is an optional property */
-	ret = gpiod_count(dev, "hisilicon,clken");
+	ret = of_gpio_named_count(np, "hisilicon,clken-gpios");
 	if (ret < 0)
 		return 0;
 

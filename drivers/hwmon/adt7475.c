@@ -1342,7 +1342,7 @@ static int adt7475_detect(struct i2c_client *client,
 		return -ENODEV;
 	}
 
-	strscpy(info->type, name, I2C_NAME_SIZE);
+	strlcpy(info->type, name, I2C_NAME_SIZE);
 
 	return 0;
 }

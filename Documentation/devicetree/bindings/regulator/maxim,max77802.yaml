@@ -79,7 +79,6 @@ patternProperties:
     patternProperties:
       regulator-state-(standby|mem|disk):
         type: object
-        additionalProperties: true
         properties:
           regulator-mode: false
 

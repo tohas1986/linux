@@ -130,8 +130,7 @@ examples:
             port@4 {
                 reg = <4>;
                 ethernet = <&gmac2>;
-                phy-mode = "internal";
-
+                label = "cpu";
                 fixed-link {
                   speed = <1000>;
                   full-duplex;

@@ -78,7 +78,7 @@ static unsigned long vdso_base(void)
 	unsigned long base = STACK_TOP;
 
 	if (current->flags & PF_RANDOMIZE) {
-		base += prandom_u32_max(VDSO_RANDOMIZE_SIZE);
+		base += get_random_int() & (VDSO_RANDOMIZE_SIZE - 1);
 		base = PAGE_ALIGN(base);
 	}
 

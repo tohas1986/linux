@@ -354,8 +354,12 @@ static void atm_tc_walk(struct Qdisc *sch, struct qdisc_walker *walker)
 	if (walker->stop)
 		return;
 	list_for_each_entry(flow, &p->flows, list) {
-		if (!tc_qdisc_stats_dump(sch, (unsigned long)flow, walker))
+		if (walker->count >= walker->skip &&
+		    walker->fn(sch, (unsigned long)flow, walker) < 0) {
+			walker->stop = 1;
 			break;
+		}
+		walker->count++;
 	}
 }
 
@@ -393,13 +397,10 @@ static int atm_tc_enqueue(struct sk_buff *skb, struct Qdisc *sch,
 				result = tcf_classify(skb, NULL, fl, &res, true);
 				if (result < 0)
 					continue;
-				if (result == TC_ACT_SHOT)
-					goto done;
-
 				flow = (struct atm_flow_data *)res.class;
 				if (!flow)
 					flow = lookup_flow(sch, res.classid);
-				goto drop;
+				goto done;
 			}
 		}
 		flow = NULL;

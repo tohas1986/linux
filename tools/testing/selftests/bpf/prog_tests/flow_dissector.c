@@ -8,8 +8,6 @@
 
 #include "bpf_flow.skel.h"
 
-#define FLOW_CONTINUE_SADDR 0x7f00007f /* 127.0.0.127 */
-
 #ifndef IP_MF
 #define IP_MF 0x2000
 #endif
@@ -102,7 +100,6 @@ struct test {
 	} pkt;
 	struct bpf_flow_keys keys;
 	__u32 flags;
-	__u32 retval;
 };
 
 #define VLAN_HLEN	4
@@ -129,7 +126,6 @@ struct test tests[] = {
 			.sport = 80,
 			.dport = 8080,
 		},
-		.retval = BPF_OK,
 	},
 	{
 		.name = "ipv6",
@@ -150,7 +146,6 @@ struct test tests[] = {
 			.sport = 80,
 			.dport = 8080,
 		},
-		.retval = BPF_OK,
 	},
 	{
 		.name = "802.1q-ipv4",
@@ -173,7 +168,6 @@ struct test tests[] = {
 			.sport = 80,
 			.dport = 8080,
 		},
-		.retval = BPF_OK,
 	},
 	{
 		.name = "802.1ad-ipv6",
@@ -197,7 +191,6 @@ struct test tests[] = {
 			.sport = 80,
 			.dport = 8080,
 		},
-		.retval = BPF_OK,
 	},
 	{
 		.name = "ipv4-frag",
@@ -224,7 +217,6 @@ struct test tests[] = {
 			.dport = 8080,
 		},
 		.flags = BPF_FLOW_DISSECTOR_F_PARSE_1ST_FRAG,
-		.retval = BPF_OK,
 	},
 	{
 		.name = "ipv4-no-frag",
@@ -247,7 +239,6 @@ struct test tests[] = {
 			.is_frag = true,
 			.is_first_frag = true,
 		},
-		.retval = BPF_OK,
 	},
 	{
 		.name = "ipv6-frag",
@@ -274,7 +265,6 @@ struct test tests[] = {
 			.dport = 8080,
 		},
 		.flags = BPF_FLOW_DISSECTOR_F_PARSE_1ST_FRAG,
-		.retval = BPF_OK,
 	},
 	{
 		.name = "ipv6-no-frag",
@@ -297,7 +287,6 @@ struct test tests[] = {
 			.is_frag = true,
 			.is_first_frag = true,
 		},
-		.retval = BPF_OK,
 	},
 	{
 		.name = "ipv6-flow-label",
@@ -320,7 +309,6 @@ struct test tests[] = {
 			.dport = 8080,
 			.flow_label = __bpf_constant_htonl(0xbeeef),
 		},
-		.retval = BPF_OK,
 	},
 	{
 		.name = "ipv6-no-flow-label",
@@ -343,7 +331,6 @@ struct test tests[] = {
 			.flow_label = __bpf_constant_htonl(0xbeeef),
 		},
 		.flags = BPF_FLOW_DISSECTOR_F_STOP_AT_FLOW_LABEL,
-		.retval = BPF_OK,
 	},
 	{
 		.name = "ipip-encap",
@@ -372,7 +359,6 @@ struct test tests[] = {
 			.sport = 80,
 			.dport = 8080,
 		},
-		.retval = BPF_OK,
 	},
 	{
 		.name = "ipip-no-encap",
@@ -400,26 +386,6 @@ struct test tests[] = {
 			.is_encap = true,
 		},
 		.flags = BPF_FLOW_DISSECTOR_F_STOP_AT_ENCAP,
-		.retval = BPF_OK,
-	},
-	{
-		.name = "ipip-encap-dissector-continue",
-		.pkt.ipip = {
-			.eth.h_proto = __bpf_constant_htons(ETH_P_IP),
-			.iph.ihl = 5,
-			.iph.protocol = IPPROTO_IPIP,
-			.iph.tot_len = __bpf_constant_htons(MAGIC_BYTES),
-			.iph.saddr = __bpf_constant_htonl(FLOW_CONTINUE_SADDR),
-			.iph_inner.ihl = 5,
-			.iph_inner.protocol = IPPROTO_TCP,
-			.iph_inner.tot_len =
-				__bpf_constant_htons(MAGIC_BYTES) -
-				sizeof(struct iphdr),
-			.tcp.doff = 5,
-			.tcp.source = 99,
-			.tcp.dest = 9090,
-		},
-		.retval = BPF_FLOW_DISSECTOR_CONTINUE,
 	},
 };
 
@@ -537,10 +503,6 @@ static void run_tests_skb_less(int tap_fd, struct bpf_map *keys)
 		err = tx_tap(tap_fd, &tests[i].pkt, sizeof(tests[i].pkt));
 		CHECK(err < 0, "tx_tap", "err %d errno %d\n", err, errno);
 
-		/* check the stored flow_keys only if BPF_OK expected */
-		if (tests[i].retval != BPF_OK)
-			continue;
-
 		err = bpf_map_lookup_elem(keys_fd, &key, &flow_keys);
 		ASSERT_OK(err, "bpf_map_lookup_elem");
 
@@ -626,11 +588,7 @@ void test_flow_dissector(void)
 
 		err = bpf_prog_test_run_opts(prog_fd, &topts);
 		ASSERT_OK(err, "test_run");
-		ASSERT_EQ(topts.retval, tests[i].retval, "test_run retval");
-
-		/* check the resulting flow_keys only if BPF_OK returned */
-		if (topts.retval != BPF_OK)
-			continue;
+		ASSERT_EQ(topts.retval, 1, "test_run retval");
 		ASSERT_EQ(topts.data_size_out, sizeof(flow_keys),
 			  "test_run data_size_out");
 		CHECK_FLOW_KEYS(tests[i].name, flow_keys, tests[i].keys);

@@ -1160,7 +1160,7 @@ void __init debug_ll_io_init(void)
 }
 #endif
 
-static unsigned long __initdata vmalloc_size = 240 * SZ_1M;
+static unsigned long __initdata vmalloc_size = 1024 * SZ_1M;
 
 /*
  * vmalloc=size forces the vmalloc area to be exactly 'size'

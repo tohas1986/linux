@@ -291,7 +291,20 @@ static int nat_t120(struct sk_buff *skb, struct nf_conn *ct,
 	exp->expectfn = nf_nat_follow_master;
 	exp->dir = !dir;
 
-	nated_port = nf_nat_exp_find_port(exp, nated_port);
+	/* Try to get same port: if not, try to change it. */
+	for (; nated_port != 0; nated_port++) {
+		int ret;
+
+		exp->tuple.dst.u.tcp.port = htons(nated_port);
+		ret = nf_ct_expect_related(exp, 0);
+		if (ret == 0)
+			break;
+		else if (ret != -EBUSY) {
+			nated_port = 0;
+			break;
+		}
+	}
+
 	if (nated_port == 0) {	/* No port available */
 		net_notice_ratelimited("nf_nat_h323: out of TCP ports\n");
 		return 0;
@@ -334,7 +347,20 @@ static int nat_h245(struct sk_buff *skb, struct nf_conn *ct,
 	if (info->sig_port[dir] == port)
 		nated_port = ntohs(info->sig_port[!dir]);
 
-	nated_port = nf_nat_exp_find_port(exp, nated_port);
+	/* Try to get same port: if not, try to change it. */
+	for (; nated_port != 0; nated_port++) {
+		int ret;
+
+		exp->tuple.dst.u.tcp.port = htons(nated_port);
+		ret = nf_ct_expect_related(exp, 0);
+		if (ret == 0)
+			break;
+		else if (ret != -EBUSY) {
+			nated_port = 0;
+			break;
+		}
+	}
+
 	if (nated_port == 0) {	/* No port available */
 		net_notice_ratelimited("nf_nat_q931: out of TCP ports\n");
 		return 0;
@@ -413,7 +439,20 @@ static int nat_q931(struct sk_buff *skb, struct nf_conn *ct,
 	if (info->sig_port[dir] == port)
 		nated_port = ntohs(info->sig_port[!dir]);
 
-	nated_port = nf_nat_exp_find_port(exp, nated_port);
+	/* Try to get same port: if not, try to change it. */
+	for (; nated_port != 0; nated_port++) {
+		int ret;
+
+		exp->tuple.dst.u.tcp.port = htons(nated_port);
+		ret = nf_ct_expect_related(exp, 0);
+		if (ret == 0)
+			break;
+		else if (ret != -EBUSY) {
+			nated_port = 0;
+			break;
+		}
+	}
+
 	if (nated_port == 0) {	/* No port available */
 		net_notice_ratelimited("nf_nat_ras: out of TCP ports\n");
 		return 0;
@@ -493,7 +532,20 @@ static int nat_callforwarding(struct sk_buff *skb, struct nf_conn *ct,
 	exp->expectfn = ip_nat_callforwarding_expect;
 	exp->dir = !dir;
 
-	nated_port = nf_nat_exp_find_port(exp, ntohs(port));
+	/* Try to get same port: if not, try to change it. */
+	for (nated_port = ntohs(port); nated_port != 0; nated_port++) {
+		int ret;
+
+		exp->tuple.dst.u.tcp.port = htons(nated_port);
+		ret = nf_ct_expect_related(exp, 0);
+		if (ret == 0)
+			break;
+		else if (ret != -EBUSY) {
+			nated_port = 0;
+			break;
+		}
+	}
+
 	if (nated_port == 0) {	/* No port available */
 		net_notice_ratelimited("nf_nat_q931: out of TCP ports\n");
 		return 0;

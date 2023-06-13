@@ -586,7 +586,7 @@ static int lm80_detect(struct i2c_client *client, struct i2c_board_info *info)
 		name = "lm80";
 	}
 
-	strscpy(info->type, name, I2C_NAME_SIZE);
+	strlcpy(info->type, name, I2C_NAME_SIZE);
 
 	return 0;
 }

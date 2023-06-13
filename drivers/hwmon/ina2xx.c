@@ -40,53 +40,108 @@
 #include <linux/platform_data/ina2xx.h>
 
 /* common register definitions */
-#define INA2XX_CONFIG			0x00
-#define INA2XX_SHUNT_VOLTAGE		0x01 /* readonly */
-#define INA2XX_BUS_VOLTAGE		0x02 /* readonly */
-#define INA2XX_POWER			0x03 /* readonly */
-#define INA2XX_CURRENT			0x04 /* readonly */
-#define INA2XX_CALIBRATION		0x05
+#define INA2XX_CONFIG					0x00
+#define INA2XX_SHUNT_VOLTAGE			0x01 /* readonly */
+#define INA2XX_BUS_VOLTAGE				0x02 /* readonly */
+#define INA2XX_POWER					0x03 /* readonly */
+#define INA2XX_CURRENT					0x04 /* readonly */
+#define INA2XX_CALIBRATION				0x05
 
 /* INA226 register definitions */
-#define INA226_MASK_ENABLE		0x06
-#define INA226_ALERT_LIMIT		0x07
-#define INA226_DIE_ID			0xFF
+#define INA226_MASK_ENABLE				0x06
+#define INA226_ALERT_LIMIT				0x07
+#define INA226_DIE_ID					0xFF
 
 /* register count */
-#define INA219_REGISTERS		6
-#define INA226_REGISTERS		8
+#define INA219_REGISTERS				6
+#define INA226_REGISTERS				8
 
-#define INA2XX_MAX_REGISTERS		8
+#define INA2XX_MAX_REGISTERS			8
 
 /* settings - depend on use case */
-#define INA219_CONFIG_DEFAULT		0x399F	/* PGA=8 */
-#define INA226_CONFIG_DEFAULT		0x4527	/* averages=16 */
+#define INA226_CONFIG_DEFAULT			0x4527	/* averages=16 */
+
+/* INA219 config register bits */
+#define INA219_CONFIG_RST				( 1 << 15 )
+#define INA219_CONFIG_RST_MASK			( 1 << 15 )
+
+/* Bus voltage range */
+#define INA219_CONFIG_BRNG_16V			( 0 << 13 )
+#define INA219_CONFIG_BRNG_32V			( 1 << 13 )
+#define INA219_CONFIG_BRNG_MASK			( 1 << 13 )
+
+/* Shunt voltage ADC preamp divider */
+#define INA219_CONFIG_PGA_1				( 0 << 11 )
+#define INA219_CONFIG_PGA_2				( 1 << 11 )
+#define INA219_CONFIG_PGA_4				( 2 << 11 )
+#define INA219_CONFIG_PGA_8				( 3 << 11 )
+#define INA219_CONFIG_PGA_MASK			( 3 << 11 )
+
+/* Bus ADC resolution and averaging */
+#define INA219_CONFIG_BADC_9B_1S		( 0 << 7 )
+#define INA219_CONFIG_BADC_10B_1S		( 1 << 7 )
+#define INA219_CONFIG_BADC_11B_1S		( 2 << 7 )
+#define INA219_CONFIG_BADC_12B_1S		( 3 << 7 )
+#define INA219_CONFIG_BADC_12B_2S		( 9 << 7 )
+#define INA219_CONFIG_BADC_12B_4S		( 10 << 7 )
+#define INA219_CONFIG_BADC_12B_8S		( 11 << 7 )
+#define INA219_CONFIG_BADC_12B_16S		( 12 << 7 )
+#define INA219_CONFIG_BADC_12B_32S		( 13 << 7 )
+#define INA219_CONFIG_BADC_12B_64S		( 14 << 7 )
+#define INA219_CONFIG_BADC_12B_128S		( 15 << 7 )
+#define INA219_CONFIG_BADC_MASK			( 15 << 7 )
+
+/* Shunt ADC resolution and averaging */
+#define INA219_CONFIG_SADC_9B_1S		( 0 << 3 )
+#define INA219_CONFIG_SADC_10B_1S		( 1 << 3 )
+#define INA219_CONFIG_SADC_11B_1S		( 2 << 3 )
+#define INA219_CONFIG_SADC_12B_1S		( 3 << 3 )
+#define INA219_CONFIG_SADC_12B_2S		( 9 << 3 )
+#define INA219_CONFIG_SADC_12B_4S		( 10 << 3 )
+#define INA219_CONFIG_SADC_12B_8S		( 11 << 3 )
+#define INA219_CONFIG_SADC_12B_16S		( 12 << 3 )
+#define INA219_CONFIG_SADC_12B_32S		( 13 << 3 )
+#define INA219_CONFIG_SADC_12B_64S		( 14 << 3 )
+#define INA219_CONFIG_SADC_12B_128S		( 15 << 3 )
+#define INA219_CONFIG_SADC_MASK			( 15 << 3 )
+
+/* Modes of operation */
+#define INA219_CONFIG_MODE_PWRDWN		( 0 << 0 )
+#define INA219_CONFIG_MODE_SHUNT_TRG	( 1 << 0 )
+#define INA219_CONFIG_MODE_BUS_TRG		( 2 << 0 )
+#define INA219_CONFIG_MODE_ALL_TRG		( 3 << 0 )
+#define INA219_CONFIG_MODE_ADC_OFF		( 4 << 0 )
+#define INA219_CONFIG_MODE_SHUNT_CONT	( 5 << 0 )
+#define INA219_CONFIG_MODE_BUS_CONT		( 6 << 0 )
+#define INA219_CONFIG_MODE_ALL_CONT		( 7 << 0 )
+#define INA219_CONFIG_MODE_MASK			( 7 << 0 )
+
 
 /* worst case is 68.10 ms (~14.6Hz, ina219) */
-#define INA2XX_CONVERSION_RATE		15
-#define INA2XX_MAX_DELAY		69 /* worst case delay in ms */
+#define INA2XX_CONVERSION_RATE			15
+#define INA2XX_MAX_DELAY				69 /* worst case delay in ms */
 
-#define INA2XX_RSHUNT_DEFAULT		10000
+#define INA2XX_RSHUNT_DEFAULT			10000
 
 /* bit mask for reading the averaging setting in the configuration register */
-#define INA226_AVG_RD_MASK		0x0E00
+#define INA226_AVG_RD_MASK				0x0E00
 
-#define INA226_READ_AVG(reg)		(((reg) & INA226_AVG_RD_MASK) >> 9)
-#define INA226_SHIFT_AVG(val)		((val) << 9)
+#define INA226_READ_AVG(reg)			(((reg) & INA226_AVG_RD_MASK) >> 9)
+#define INA226_SHIFT_AVG(val)			((val) << 9)
 
 /* bit number of alert functions in Mask/Enable Register */
 #define INA226_SHUNT_OVER_VOLTAGE_BIT	15
 #define INA226_SHUNT_UNDER_VOLTAGE_BIT	14
-#define INA226_BUS_OVER_VOLTAGE_BIT	13
+#define INA226_BUS_OVER_VOLTAGE_BIT		13
 #define INA226_BUS_UNDER_VOLTAGE_BIT	12
-#define INA226_POWER_OVER_LIMIT_BIT	11
+#define INA226_POWER_OVER_LIMIT_BIT		11
 
 /* bit mask for alert config bits of Mask/Enable Register */
-#define INA226_ALERT_CONFIG_MASK	0xFC00
-#define INA226_ALERT_FUNCTION_FLAG	BIT(4)
+#define INA226_ALERT_CONFIG_MASK		0xFC00
+#define INA226_ALERT_FUNCTION_FLAG		BIT(4)
 
 /* common attrs, ina226 attrs and NULL */
-#define INA2XX_MAX_ATTRIBUTE_GROUPS	3
+#define INA2XX_MAX_ATTRIBUTE_GROUPS		3
 
 /*
  * Both bus voltage and shunt voltage conversion times for ina226 are set
@@ -115,6 +170,8 @@ struct ina2xx_data {
 	const struct ina2xx_config *config;
 
 	long rshunt;
+	long linear_k;
+	long linear_b;
 	long current_lsb_uA;
 	long power_lsb_uW;
 	struct mutex config_lock;
@@ -125,7 +182,11 @@ struct ina2xx_data {
 
 static const struct ina2xx_config ina2xx_config[] = {
 	[ina219] = {
-		.config_default = INA219_CONFIG_DEFAULT,
+		.config_default =	INA219_CONFIG_BRNG_32V | \
+					INA219_CONFIG_PGA_8 | \
+					INA219_CONFIG_BADC_12B_128S | \
+					INA219_CONFIG_SADC_12B_128S | \
+					INA219_CONFIG_MODE_ALL_CONT,
 		.calibration_value = 4096,
 		.registers = INA219_REGISTERS,
 		.shunt_div = 100,
@@ -452,6 +513,72 @@ static ssize_t ina226_alarm_show(struct device *dev,
 	return sysfs_emit(buf, "%d\n", alarm);
 }
 
+static ssize_t ina2xx_power_show(struct device *dev,
+				struct device_attribute *da, char *buf)
+{
+	unsigned int v_bus, v_shunt;
+	int err;
+	long i_shunt;
+	struct ina2xx_data *data = dev_get_drvdata(dev);
+
+	/* In case linear correction is not set - do as usual */
+	if (data->linear_k == 0 && data->linear_b == 0)
+		return ina2xx_value_show(dev, da, buf);
+
+	/* With linear correction enabled, read shunt drop, bus voltage
+	 * and calculate everything manually */
+
+	if (data->rshunt == 0)
+		return -1;
+
+	err = ina2xx_read_reg(dev, INA2XX_SHUNT_VOLTAGE, &v_shunt);
+	if (err < 0)
+		return err;
+
+	err = ina2xx_read_reg(dev, INA2XX_BUS_VOLTAGE, &v_bus);
+	if (err < 0)
+		return err;
+
+	/* Bus voltage: lshift by 3 bits then multiply by LSB (4mV) */
+	v_bus >>= 3;
+	v_bus *= 4;
+
+	/* Shunt drop also must be multiplied by LSB (4mv) */
+	v_shunt *= 4;
+
+	i_shunt = data->linear_k * v_shunt / data->rshunt;
+	i_shunt += data->linear_b;
+
+	return snprintf(buf, PAGE_SIZE, "%ld\n", i_shunt * v_bus);
+}
+
+static ssize_t ina2xx_current_show(struct device *dev,
+				struct device_attribute *da, char *buf)
+{
+	unsigned int v_shunt;
+	int err;
+	long i_shunt;
+	struct ina2xx_data *data = dev_get_drvdata(dev);
+
+	/* In case linear correction is not set - do as usual */
+	if (data->linear_k == 0 && data->linear_b == 0)
+		return ina2xx_value_show(dev, da, buf);
+
+	/* With linear correction enabled, read shunt drop
+	* and calculate it with help of y = k*x + b equation */
+
+	if (data->rshunt == 0)
+		return -1;
+
+	err = ina2xx_read_reg(dev, INA2XX_SHUNT_VOLTAGE, &v_shunt);
+	if (err < 0)
+		return err;
+
+	i_shunt = data->linear_k * v_shunt * 4 / data->rshunt;
+	i_shunt += data->linear_b;
+	return snprintf(buf, PAGE_SIZE, "%ld\n", i_shunt);
+}
+
 /*
  * In order to keep calibration register value fixed, the product
  * of current_lsb and shunt_resistor should also be fixed and equal
@@ -539,6 +666,52 @@ static ssize_t ina226_interval_show(struct device *dev,
 	return sysfs_emit(buf, "%d\n", ina226_reg_to_interval(regval));
 }
 
+static ssize_t ina219_linear_k_show(struct device *dev,
+				    struct device_attribute *da, char *buf)
+{
+	struct ina2xx_data *data = dev_get_drvdata(dev);
+	return snprintf(buf, PAGE_SIZE, "%ld\n", data->linear_k);
+}
+
+static ssize_t ina219_linear_k_store(struct device *dev,
+				   struct device_attribute *da,
+				   const char *buf, size_t count)
+{
+	struct ina2xx_data *data = dev_get_drvdata(dev);
+	unsigned long val;
+	int status;
+
+	status = kstrtol(buf, 10, &val);
+	if (status < 0)
+		return status;
+
+	data->linear_k = val;
+	return count;
+}
+
+static ssize_t ina219_linear_b_show(struct device *dev,
+				    struct device_attribute *da, char *buf)
+{
+	struct ina2xx_data *data = dev_get_drvdata(dev);
+	return snprintf(buf, PAGE_SIZE, "%ld\n", data->linear_b);
+}
+
+static ssize_t ina219_linear_b_store(struct device *dev,
+				   struct device_attribute *da,
+				   const char *buf, size_t count)
+{
+	struct ina2xx_data *data = dev_get_drvdata(dev);
+	unsigned long val;
+	int status;
+
+	status = kstrtol(buf, 10, &val);
+	if (status < 0)
+		return status;
+
+	data->linear_b = val;
+	return count;
+}
+
 /* shunt voltage */
 static SENSOR_DEVICE_ATTR_RO(in0_input, ina2xx_value, INA2XX_SHUNT_VOLTAGE);
 /* shunt voltage over/under voltage alert setting and alarm */
@@ -574,11 +747,23 @@ static SENSOR_DEVICE_ATTR_RW(power1_crit, ina226_alert,
 static SENSOR_DEVICE_ATTR_RO(power1_crit_alarm, ina226_alarm,
 			     INA226_POWER_OVER_LIMIT_BIT);
 
+/* linear corrected current */
+static SENSOR_DEVICE_ATTR_RO(curr2_input, ina2xx_current, INA2XX_CURRENT);
+
+/* linear corrected power */
+static SENSOR_DEVICE_ATTR_RO(power2_input, ina2xx_power, INA2XX_POWER);
+
 /* shunt resistance */
 static SENSOR_DEVICE_ATTR_RW(shunt_resistor, ina2xx_shunt, INA2XX_CALIBRATION);
 
 /* update interval (ina226 only) */
 static SENSOR_DEVICE_ATTR_RW(update_interval, ina226_interval, 0);
+
+/* linear correction k coefficient */
+static SENSOR_DEVICE_ATTR_RW(linear_k, ina219_linear_k, 0);
+
+/* linear correction b coefficient */
+static SENSOR_DEVICE_ATTR_RW(linear_b, ina219_linear_b, 0);
 
 /* pointers to created device attributes */
 static struct attribute *ina2xx_attrs[] = {
@@ -586,7 +771,11 @@ static struct attribute *ina2xx_attrs[] = {
 	&sensor_dev_attr_in1_input.dev_attr.attr,
 	&sensor_dev_attr_curr1_input.dev_attr.attr,
 	&sensor_dev_attr_power1_input.dev_attr.attr,
+	&sensor_dev_attr_curr2_input.dev_attr.attr,
+	&sensor_dev_attr_power2_input.dev_attr.attr,
 	&sensor_dev_attr_shunt_resistor.dev_attr.attr,
+	&sensor_dev_attr_linear_k.dev_attr.attr,
+	&sensor_dev_attr_linear_b.dev_attr.attr,
 	NULL,
 };
 
@@ -648,6 +837,17 @@ static int ina2xx_probe(struct i2c_client *client)
 
 	ina2xx_set_shunt(data, val);
 
+	if (of_property_read_s32(dev->of_node, "linear-k", &val) == 0)
+		data->linear_k = val;
+	else
+		data->linear_k = 0;
+
+	if (of_property_read_s32(dev->of_node, "linear-b", &val) == 0)
+		data->linear_b = val;
+	else
+		data->linear_b = 0;
+
+
 	ina2xx_regmap_config.max_register = data->config->registers;
 
 	data->regmap = devm_regmap_init_i2c(client, &ina2xx_regmap_config);
@@ -659,7 +859,6 @@ static int ina2xx_probe(struct i2c_client *client)
 	ret = ina2xx_init(data);
 	if (ret < 0) {
 		dev_err(dev, "error configuring the device: %d\n", ret);
-		return -ENODEV;
 	}
 
 	data->groups[group++] = &ina2xx_group;
@@ -673,6 +872,10 @@ static int ina2xx_probe(struct i2c_client *client)
 
 	dev_info(dev, "power monitor %s (Rshunt = %li uOhm)\n",
 		 client->name, data->rshunt);
+
+	if (data->linear_k != 0 && data->linear_b !=0 )
+		dev_info(dev, "linear correction enabled k=%ld b=%ld\n",
+			data->linear_k, data->linear_b);
 
 	return 0;
 }

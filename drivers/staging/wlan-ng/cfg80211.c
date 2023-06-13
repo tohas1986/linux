@@ -143,8 +143,8 @@ exit:
 }
 
 static int prism2_add_key(struct wiphy *wiphy, struct net_device *dev,
-			  int link_id, u8 key_index, bool pairwise,
-			  const u8 *mac_addr, struct key_params *params)
+			  u8 key_index, bool pairwise, const u8 *mac_addr,
+			  struct key_params *params)
 {
 	struct wlandevice *wlandev = dev->ml_priv;
 	u32 did;
@@ -172,7 +172,7 @@ static int prism2_add_key(struct wiphy *wiphy, struct net_device *dev,
 }
 
 static int prism2_get_key(struct wiphy *wiphy, struct net_device *dev,
-			  int link_id, u8 key_index, bool pairwise,
+			  u8 key_index, bool pairwise,
 			  const u8 *mac_addr, void *cookie,
 			  void (*callback)(void *cookie, struct key_params*))
 {
@@ -202,8 +202,7 @@ static int prism2_get_key(struct wiphy *wiphy, struct net_device *dev,
 }
 
 static int prism2_del_key(struct wiphy *wiphy, struct net_device *dev,
-			  int link_id, u8 key_index, bool pairwise,
-			  const u8 *mac_addr)
+			  u8 key_index, bool pairwise, const u8 *mac_addr)
 {
 	struct wlandevice *wlandev = dev->ml_priv;
 	u32 did;
@@ -228,8 +227,7 @@ static int prism2_del_key(struct wiphy *wiphy, struct net_device *dev,
 }
 
 static int prism2_set_default_key(struct wiphy *wiphy, struct net_device *dev,
-				  int link_id, u8 key_index, bool unicast,
-				  bool multicast)
+				  u8 key_index, bool unicast, bool multicast)
 {
 	struct wlandevice *wlandev = dev->ml_priv;
 

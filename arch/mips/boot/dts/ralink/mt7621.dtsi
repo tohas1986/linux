@@ -33,6 +33,11 @@
 		compatible = "mti,cpu-interrupt-controller";
 	};
 
+	aliases {
+		serial0 = &uartlite;
+	};
+
+
 	mmc_fixed_3v3: regulator-3v3 {
 		compatible = "regulator-fixed";
 		regulator-name = "mmc_power";
@@ -105,16 +110,17 @@
 			pinctrl-0 = <&i2c_pins>;
 		};
 
-		memc: memory-controller@5000 {
+		memc: syscon@5000 {
 			compatible = "mediatek,mt7621-memc", "syscon";
 			reg = <0x5000 0x1000>;
 		};
 
-		serial0: serial@c00 {
+		uartlite: uartlite@c00 {
 			compatible = "ns16550a";
 			reg = <0xc00 0x100>;
 
 			clocks = <&sysc MT7621_CLK_UART1>;
+			clock-names = "uart1";
 
 			interrupt-parent = <&gic>;
 			interrupts = <GIC_SHARED 26 IRQ_TYPE_LEVEL_HIGH>;
@@ -230,7 +236,7 @@
 		};
 	};
 
-	mmc: mmc@1e130000 {
+	sdhci: sdhci@1e130000 {
 		status = "disabled";
 
 		compatible = "mediatek,mt7620-mmc";
@@ -256,8 +262,8 @@
 		interrupts = <GIC_SHARED 20 IRQ_TYPE_LEVEL_HIGH>;
 	};
 
-	usb: usb@1e1c0000 {
-		compatible = "mediatek,mt8173-xhci", "mediatek,mtk-xhci";
+	xhci: xhci@1e1c0000 {
+		compatible = "mediatek,mt8173-xhci";
 		reg = <0x1e1c0000 0x1000
 		       0x1e1d0700 0x0100>;
 		reg-names = "mac", "ippc";
@@ -332,22 +338,23 @@
 		gmac1: mac@1 {
 			compatible = "mediatek,eth-mac";
 			reg = <1>;
-			status = "disabled";
-			phy-mode = "rgmii";
+			status = "off";
+			phy-mode = "rgmii-rxid";
 		};
 
 		mdio: mdio-bus {
 			#address-cells = <1>;
 			#size-cells = <0>;
 
-			switch0: switch@1f {
+			switch0: switch0@0 {
 				compatible = "mediatek,mt7621";
-				reg = <0x1f>;
+				reg = <0>;
 				mediatek,mcm;
 				resets = <&sysc MT7621_RST_MCM>;
 				reset-names = "mcm";
 				interrupt-controller;
 				#interrupt-cells = <1>;
+				interrupt-parent = <&gic>;
 				interrupts = <GIC_SHARED 23 IRQ_TYPE_LEVEL_HIGH>;
 
 				ports {
@@ -355,31 +362,31 @@
 					#size-cells = <0>;
 
 					port@0 {
-						status = "disabled";
+						status = "off";
 						reg = <0>;
 						label = "lan0";
 					};
 
 					port@1 {
-						status = "disabled";
+						status = "off";
 						reg = <1>;
 						label = "lan1";
 					};
 
 					port@2 {
-						status = "disabled";
+						status = "off";
 						reg = <2>;
 						label = "lan2";
 					};
 
 					port@3 {
-						status = "disabled";
+						status = "off";
 						reg = <3>;
 						label = "lan3";
 					};
 
 					port@4 {
-						status = "disabled";
+						status = "off";
 						reg = <4>;
 						label = "lan4";
 					};

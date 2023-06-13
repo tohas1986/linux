@@ -33,6 +33,8 @@ properties:
     description: GPIO connected to the OE (Output Enable) pin.
     maxItems: 1
 
+  spi-max-frequency: true
+
 patternProperties:
   "^(hog-[0-9]+|.+-hog(-[0-9]+)?)$":
     type: object
@@ -57,10 +59,7 @@ required:
   - '#gpio-cells'
   - registers-number
 
-allOf:
-  - $ref: /schemas/spi/spi-peripheral-props.yaml#
-
-unevaluatedProperties: false
+additionalProperties: false
 
 examples:
   - |

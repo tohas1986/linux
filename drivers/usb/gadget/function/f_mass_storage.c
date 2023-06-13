@@ -194,6 +194,7 @@
 #include <linux/usb/composite.h>
 
 #include <linux/nospec.h>
+#include <linux/cdrom.h>
 
 #include "configfs.h"
 
@@ -207,6 +208,218 @@ static const char fsg_string_interface[] = "Mass Storage";
 
 #include "storage_common.h"
 #include "f_mass_storage.h"
+
+
+/*------------------------------------------------------------------------*/
+
+/**
+ * @brief The handler of incoming CDB command
+ * @param cmd		- SCSI command number
+ * @param callback	- The callback of handle the incoming command
+ */
+#define CDB_REG_HANDLER(cmd, callback)                                         \
+	.command = (cmd), .do_command = (callback),                            \
+	.type = CDB_HANDLER_COMMON, .name = (#cmd)
+
+/**
+ * @brief The handler of incoming CDB command
+ * @param cmd		- SCSI command nubmer with fsg buffhd
+ * @param callback	- The callback of handle the incoming command
+ */
+#define CDB_REG_HANDLER_BUFFHD(cmd, callback)                                  \
+	.command = (cmd), .do_command_with_buffhd = (callback),                \
+	.type = CDB_HANDLER_FSG_BUFFHD, .name = (#cmd)
+
+/**
+ * @see CDB_REG_CHECKER_DS
+ * @details Register CDB command without additional check handler.
+ */
+#define CDB_REG_NO_CHECKER(cmd, si, dir, req)                                  \
+	.command = (cmd), .direction = (dir), .size_index = (si),              \
+	.medium_required = (req), .do_check_command = NULL,
+
+/**
+ * @brief Register the CDB command checker, which checks an incoming command
+ * by specified criteria.
+ * This validator will take care of the specified data size (DS)
+ *
+ * @param cmd	- SCSI command nubmer
+ * @param s		- CDB command size in bytes
+ * @param si	- The CDB command might have the recommended response size.
+ * This field indicates the size field index in the input CDB command
+ * buffer
+ * @param dir	- Direction of data transfer of requested CDB command
+ * @param mask  - Mask of relevant bytes in the input command buffer.
+ * The ordinal number of a bit in the mask indicates that a byte in the
+ * CDB command buffer might be present.
+ * If that ordinal number bit equals zero, only a zero value must be
+ * present in this original byte.
+ * @param req	- Indicates that medium MUST be present or might be optional
+ * @param ds	- If @param SI member is equal to @enum CDB_SIZE_MANUAL, than this
+ * field indicates the custom response buffer size
+ */
+#define CDB_REG_CHECKER_DS(cmd, s, si, dir, mask, req, ds)                     \
+	.command = (cmd), .size = (s), .size_index = (si), .direction = (dir), \
+	.valid_bytes_bitmask = (mask), .medium_required = (req),               \
+	.data_size_manual = (ds), .do_check_command = &check_command
+
+/**
+ * @see CDB_REG_CHECKER_DS
+ * @details The data size is zero.
+ * This macro can't be used with the @enum CDB_SIZE_MANUAL
+ */
+#define CDB_REG_CHECKER(cmd, s, si, dir, mask, req)                            \
+	CDB_REG_CHECKER_DS(cmd, s, si, dir, mask, req, 0)
+
+/**
+ * @see CDB_REG_CHECKER_DS
+ * @details The checker which registried by this macros will validate the input
+ * data size in blocks.
+ * Block size specified by MSF interface type, in the curlun->blksize.
+ */
+#define CDB_REG_CHECKER_BLK(cmd, s, si, dir, mask, req)                        \
+	CDB_REG_CHECKER_DS(cmd, s, si, dir, mask, req, 0),                     \
+		.do_check_command = &check_command_size_in_blocks
+
+/**
+ * @brief Field index of possible data length of output buffer size, which
+ * contains in the input CDB command buffer
+ */
+enum cdb_data_size_field {
+	CDB_SIZE_MANUAL = -2,
+	CDB_NO_SIZE_FIELD = -1,
+	CDB_SIZE_FIELD_4 = 4,
+	CDB_SIZE_FIELD_6 = 6,
+	CDB_SIZE_FIELD_7 = 7,
+};
+
+/* Type of CDB command checker with associated data to check */
+struct cdb_command_check {
+	/* SCSI command number */
+	u8 command;
+	/* CDB command size */
+	size_t size;
+	/* Size field index in the input CDB command buffer */
+	enum cdb_data_size_field size_index;
+	/* CDB command data direction, @enum data_direction */
+	u8 direction;
+	/* Mask of expected meaningfull bytes in input CDB command buffer */
+	u32 valid_bytes_bitmask;
+	/* Is medium must be present or not */
+	u8 medium_required;
+	/* If data size is custom (the size_index is equal to CDB_SIZE_MANUAL),
+	 * then this field indicates the output data size
+	 */
+	u8 data_size_manual;
+	/* the CDB command checker */
+	int (*do_check_command)(struct fsg_common *common, int size,
+				enum data_direction direction,
+				unsigned int mask, int needs_medium,
+				const char *name);
+};
+
+/* CDB command hundler metadata */
+struct cdb_handler {
+	/* SCSI command number */
+	u8 command;
+	/**
+	 * @brief the CDB command hundler
+	 * @param fsg_common	- FSG instance
+	 */
+	int (*do_command)(struct fsg_common *common);
+	/**
+	 * @brief The CDB command hundler with a fsg_buffhd specified
+	 */
+	int (*do_command_with_buffhd)(struct fsg_common *common,
+				      struct fsg_buffhd *bufhd);
+	/* CDB handler type to pick a relevant callback */
+	enum { CDB_HANDLER_COMMON, CDB_HANDLER_FSG_BUFFHD } type;
+	/* SCSI command ASCII name */
+	char *name;
+};
+/*-------------------------------------------------------------------------*/
+
+#define CDF_PROFILES_COUNT (ARRAY_SIZE(cdf_supported_profiles))
+
+/* List of supported profiles */
+static struct mmc_profile cdf_supported_profiles[] = {
+	{ .profile = cpu_to_be16(MMC_PROFILE_BD_ROM) },
+	{ .profile = cpu_to_be16(MMC_PROFILE_DVD_ROM) },
+	{ .profile = cpu_to_be16(MMC_PROFILE_CD_ROM) },
+};
+
+struct cdf_profile_list_custom {
+	struct cdf_profile_list header;
+	/* We support several profiles, whose indices are declared in the
+	 * enum above
+	 */
+	struct mmc_profile profiles[CDF_PROFILES_COUNT];
+} __packed;
+
+/**
+ * Type to allocate of all supported features
+ * @param populate - callback to fill the specified feature data which
+ * is depended by medium
+ */
+struct cdr_features;
+struct cdr_features {
+	union {
+		struct cdf_profile_list_custom profile_list;
+		struct cdf_core core;
+		struct cdf_morphing morphing;
+		struct cdf_removable_medium removable;
+		struct cdf_random_readable random_readable;
+		struct cdf_multi_read multi_read;
+		struct cdf_cd_read cd_read;
+		struct cdf_dvd_read dvd_read;
+		struct cdf_rt_streaming rt_streaming;
+	} __packed feature;
+	void (*populate)(struct fsg_common *common,
+			 struct cdr_features **features);
+};
+
+/**
+ * @brief Adjust the Profile List members of actual data which is depended
+ * on the inserted medium image
+ *
+ * @param common - the FSG instance
+ * @param feature - a list of profile descriptors which to be configured
+ */
+static void cdf_populate_profile_list(struct fsg_common *common,
+				      struct cdr_features **feature);
+
+#define CDF_SET_VPC(v, p, c) .vpc = { .ver = (v), .per = (p), .cur = (c) }
+
+#define CDF_FT_SIZE(member)                                                    \
+	((sizeof(((struct cdr_features *)0)->feature.member)) -                \
+	 sizeof(struct cdb_ft_generic))
+
+#define CDR_FT_ITEM(item, c, ...)                                              \
+	CDR_FT_ITEM_S(item, c, CDF_FT_SIZE(item), __VA_ARGS__)
+
+#define CDR_FT_ITEM_S(item, c, s, ...)                                         \
+	.feature.item = { .code = cpu_to_be16(c), .length = (s), __VA_ARGS__ }
+
+static struct cdr_features features_table[] = {
+	{ CDR_FT_ITEM_S(profile_list.header, CDF_PROFILE_LIST_CODE,
+			CDF_FT_SIZE(profile_list), CDF_SET_VPC(0, 1, 1)),
+	  .populate = &cdf_populate_profile_list },
+	{ CDR_FT_ITEM(core, CDF_CORE, CDF_SET_VPC(2, 1, 1), .dbevent = 1,
+		      .interface = cpu_to_be32(CF_PIS_USB)) },
+	{ CDR_FT_ITEM(morphing, CDF_MORPHING_CODE, CDF_SET_VPC(1, 1, 1),
+		      .ocevent = 1) },
+	{ CDR_FT_ITEM(removable, CDF_REMOVEBLE_MEDIA, CDF_SET_VPC(2, 1, 1),
+		      .mechanism = CDF_LMT__TRAY_TYPE, .eject = 1, .lock = 1) },
+	{ CDR_FT_ITEM(random_readable, CDF_RANDOM_READ, CDF_SET_VPC(0, 0, 1),
+		      .block_size = cpu_to_be32(CD_FRAMESIZE),
+		      .blocking = cpu_to_be16(0x10), .pp = 1) },
+	{ CDR_FT_ITEM(dvd_read, CDF_DVD_READ, CDF_SET_VPC(2, 1, 1),
+		      .multi110 = 1, .dualr = 1) },
+	{ CDR_FT_ITEM(rt_streaming, CDF_REAL_TIME_STREAM, CDF_SET_VPC(5, 0, 1),
+		      .rbcb = 1, .scs = 1, .mp2a = 1, .wspd = 1, .sw = 1) },
+};
+
+/*------------------------------------------------------------------------*/
 
 /* Static strings, in UTF-8 (for simplicity we use only ASCII characters) */
 static struct usb_string		fsg_strings[] = {
@@ -267,6 +480,7 @@ struct fsg_common {
 	enum data_direction	data_dir;
 	u32			data_size;
 	u32			data_size_from_cmnd;
+	u32			data_size_to_handle;
 	u32			tag;
 	u32			residue;
 	u32			usb_amount_left;
@@ -683,6 +897,8 @@ static int do_read(struct fsg_common *common)
 		amount_left  -= nread;
 		common->residue -= nread;
 
+		fsg_stats_rd_attempt(&curlun->stats, nread);
+
 		/*
 		 * Except at the end of the transfer, nread will be
 		 * equal to the buffer size, which is divisible by the
@@ -883,6 +1099,8 @@ static int do_write(struct fsg_common *common)
 		amount_left_to_write -= nwritten;
 		common->residue -= nwritten;
 
+		fsg_stats_wr_attempt(&curlun->stats, nwritten);
+
 		/* If an error occurred, report it and its position */
 		if (nwritten < amount) {
 			curlun->sense_data = SS_WRITE_ERROR;
@@ -1043,7 +1261,8 @@ static int do_inquiry(struct fsg_common *common, struct fsg_buffhd *bh)
 		memset(buf, 0, 36);
 		buf[0] = TYPE_NO_LUN;	/* Unsupported, no device-type */
 		buf[4] = 31;		/* Additional length */
-		return 36;
+		common->data_size_to_handle = 36;
+		return 0;
 	}
 
 	buf[0] = curlun->cdrom ? TYPE_ROM : TYPE_DISK;
@@ -1060,7 +1279,8 @@ static int do_inquiry(struct fsg_common *common, struct fsg_buffhd *bh)
 	else
 		memcpy(buf + 8, common->inquiry_string,
 		       sizeof(common->inquiry_string));
-	return 36;
+	common->data_size_to_handle = 36;
+	return 0;
 }
 
 static int do_request_sense(struct fsg_common *common, struct fsg_buffhd *bh)
@@ -1113,7 +1333,8 @@ static int do_request_sense(struct fsg_common *common, struct fsg_buffhd *bh)
 	buf[7] = 18 - 8;			/* Additional sense length */
 	buf[12] = ASC(sd);
 	buf[13] = ASCQ(sd);
-	return 18;
+	common->data_size_to_handle = 18;
+	return 0;
 }
 
 static int do_read_capacity(struct fsg_common *common, struct fsg_buffhd *bh)
@@ -1136,7 +1357,8 @@ static int do_read_capacity(struct fsg_common *common, struct fsg_buffhd *bh)
 		max_lba = 0xffffffff;
 	put_unaligned_be32(max_lba, &buf[0]);		/* Max logical block */
 	put_unaligned_be32(curlun->blksize, &buf[4]);	/* Block length */
-	return 8;
+	common->data_size_to_handle = 8;
+	return 0;
 }
 
 static int do_read_capacity_16(struct fsg_common *common, struct fsg_buffhd *bh)
@@ -1180,10 +1402,11 @@ static int do_read_header(struct fsg_common *common, struct fsg_buffhd *bh)
 	memset(buf, 0, 8);
 	buf[0] = 0x01;		/* 2048 bytes of user data, rest is EC */
 	store_cdrom_address(&buf[4], msf, lba);
-	return 8;
+	common->data_size_to_handle = 8;
+	return 0;
 }
 
-static int do_read_toc(struct fsg_common *common, struct fsg_buffhd *bh)
+static int do_read_toc_upstream(struct fsg_common *common, struct fsg_buffhd *bh)
 {
 	struct fsg_lun	*curlun = common->curlun;
 	int		msf = common->cmnd[1] & 0x02;
@@ -1256,6 +1479,99 @@ static int do_read_toc(struct fsg_common *common, struct fsg_buffhd *bh)
 		return -EINVAL;
 	}
 }
+
+static int do_read_toc(struct fsg_common *common, struct fsg_buffhd *bh)
+{
+	struct fsg_lun *curlun = common->curlun;
+	struct cdb_read_toc_pma_atip *cdb =
+		(struct cdb_read_toc_pma_atip *)common->cmnd;
+	struct read_tpa_header *header = (struct read_tpa_header *)bh->buf;
+	struct read_tpa_toc_formatted *data =
+		(struct read_tpa_toc_formatted *)((u8 *)bh->buf +
+				          sizeof(*header));
+	size_t data_size = sizeof(*header);
+
+	if (cdb->format == 0) {
+		if (cdb->control == READ_TPA_CTRL_MAGIC_SESS) {
+			LDBG(curlun,
+				"The MMC-3 specifies format a control byte. Using Multi-Session info\n");
+			cdb->format = CDB_TPA_MULTI_SESS_INFO;
+		}
+		if (cdb->control == READ_TPA_CTRL_MAGIC_RAW) {
+			LDBG(curlun,
+				"The MMC-3 specifies format a control byte. Using RAW TOC\n");
+			cdb->format = CDB_TPA_RAW_TOC;
+		}
+	}
+
+	/* Currently support response format 0000b: Formatted TOC only */
+	if (cdb->format > CDB_TPA_MULTI_SESS_INFO) {
+		LDBG(curlun, "Unsupported TOC/PMA/ATIP format: %02Xh\n",
+			cdb->format);
+		curlun->sense_data = SS_INVALID_FIELD_IN_CDB;
+		return -EINVAL;
+	}
+
+	/*
+	 * We only support one track per disk.
+	 * We also needs to indicate the number of the last track
+	 */
+	if (cdb->number > 1 && cdb->number != READ_TPA_LEADOUT_TRACK) {
+		curlun->sense_data = SS_INVALID_FIELD_IN_CDB;
+		return -EINVAL;
+	}
+
+	/*
+	 * MULTI-SESSIOIN information must be reported only for first track.
+	 */
+	if (cdb->format == CDB_TPA_MULTI_SESS_INFO && cdb->number > 1) {
+		curlun->sense_data = SS_INVALID_FIELD_IN_CDB;
+		return -EINVAL;
+	}
+
+	memset(header, 0, sizeof(*header));
+	header->n_first_stf = 1;
+	header->n_last_stf = 1;
+
+	memset(data, 0, sizeof(*data));
+	data->addr = 1;
+	data->control = TPA_SECTOR_MODE2_MIXED;
+	data->track_number = cdb->number;
+	data_size += sizeof(*data);
+
+	/*
+	 * We have too case:
+	 *  1)  The request Track Number == 1.
+	 *      We shall set 2 descriptors: First Track, Lead-Out Track
+	 *  2)  The requested Track Number == 0xAA
+	 *      Only Lead-Out descriptor shall be set
+	 */
+	if (cdb->number == 1) {
+		DBG(common, "Fill first track addr\n");
+		store_cdrom_address((u8 *)&data->start_addr_track, cdb->msf, 0);
+
+		data += 1; /* Add one more descriptor */
+		data_size += sizeof(*data);
+		memset(data, 0, sizeof(*data));
+		/* setting the lead-out track info. First part of data*/
+		data->addr = 1;
+		data->control = TPA_SECTOR_MODE2_MIXED;
+		data->track_number = READ_TPA_LEADOUT_TRACK;
+	}
+
+	/*
+	 * Lead-out track must be set anyway.
+	 * If 0xAA Track is requested - the first part of data is already set.
+	 */
+	DBG(common, "Fill last track addr\n");
+	store_cdrom_address((u8 *)&data->start_addr_track,
+				cdb->msf, curlun->num_sectors);
+
+	header->length = cpu_to_be16(data_size - sizeof(header->length));
+	common->data_size_to_handle = data_size;
+	return 0;
+}
+
 
 static int do_mode_sense(struct fsg_common *common, struct fsg_buffhd *bh)
 {
@@ -1340,7 +1656,8 @@ static int do_mode_sense(struct fsg_common *common, struct fsg_buffhd *bh)
 		buf0[0] = len - 1;
 	else
 		put_unaligned_be16(len - 2, buf0);
-	return len;
+	common->data_size_to_handle = len;
+	return 0;
 }
 
 static int do_start_stop(struct fsg_common *common)
@@ -1431,7 +1748,8 @@ static int do_read_format_capacities(struct fsg_common *common,
 						/* Number of blocks */
 	put_unaligned_be32(curlun->blksize, &buf[4]);/* Block length */
 	buf[4] = 0x02;				/* Current capacity */
-	return 12;
+	common->data_size_to_handle = 12;
+	return 0;
 }
 
 static int do_mode_select(struct fsg_common *common, struct fsg_buffhd *bh)
@@ -1696,6 +2014,177 @@ static void send_status(struct fsg_common *common)
 	return;
 }
 
+static int do_read_disc_info(struct fsg_common *common, struct fsg_buffhd *bh)
+{
+	struct fsg_lun *curlun = common->curlun;
+	struct cdb_disc_info *cdb = (struct cdb_disc_info *)common->cmnd;
+	disc_information *info = (disc_information *)bh->buf;
+
+	if (cdb->type != DISC_TYPE_STANDARD) {
+		LERROR(curlun,
+		       "Unsupported disc information type(%02Xh) requested\n",
+		       cdb->type);
+		return -EINVAL;
+	}
+	memset(info, 0, sizeof(disc_information));
+	info->disc_information_length = cpu_to_be16(
+		sizeof(*info) - sizeof(info->disc_information_length));
+
+	info->border_status = DISC_LAST_SESS_COMPLETE;
+	info->disc_status = DISC_STATUS_FINALIZED;
+
+	/* We only support one session per disk */
+	info->n_first_track = 1;
+	info->n_sessions_lsb = 1;
+	info->first_track_lsb = 1;
+	info->last_track_lsb = 1;
+
+	/* Setting the unrestricted use because we only support (CD/DVD/BD)-ROM */
+	info->uru = 1;
+
+	info->disc_type = DISC_FIELD_DA_ROM;
+
+	common->data_size_to_handle = sizeof(*info);
+	return 0;
+}
+
+/**
+ * Attempts to guess medium type by looking at the length of the disc layout.
+ */
+static inline __be16 cdr_guess_medium_type(struct fsg_common *common)
+{
+	struct fsg_lun *curlun = common->curlun;
+	size_t length = curlun->num_sectors;
+
+	if (length <= CD_MAX_FRAMES) {
+		LDBG(curlun, "Disc layout size implies CD-ROM image\n");
+		return MMC_PROFILE_CD_ROM;
+	} else if (length <= CD_DVD_MAX_FRAMES) {
+		LDBG(curlun,
+		     "Disc layout size implies single-layer DVD-ROM image\n");
+		return MMC_PROFILE_DVD_ROM;
+	} else if (length <= CD_DVDDL_MAX_FRAMES) {
+		LDBG(curlun,
+		     "Disc layout size implies dual-layer DVD-ROM image\n");
+		return MMC_PROFILE_DVD_ROM;
+	} else if (length <= CD_BD_MAX_FRAMES) {
+		LDBG(curlun,
+		     "Disc layout size implies single-layer BD-ROM image\n");
+		return MMC_PROFILE_BD_ROM;
+	} else if (length <= CD_BDDL_MAX_FRAMES) {
+		LDBG(curlun,
+		     "Disc layout size implies dual-layer BD-ROM image\n");
+		return MMC_PROFILE_BD_ROM;
+	}
+
+	LDBG(curlun,
+	     "Disc layout size (%u) exceeds all known media types, assuming BD - ROM !\n",
+	     length);
+	return MMC_PROFILE_BD_ROM;
+}
+
+/* Adjust current profile which depended on an inserted medium */
+static inline void cdf_populate_profile_list(struct fsg_common *common,
+					     struct cdr_features **feature)
+{
+	__be16 current_media_type = cdr_guess_medium_type(common);
+	struct mmc_profile *profiles =
+		(*feature)->feature.profile_list.profiles;
+	int i;
+
+	/* copy profile list to the response buffer */
+	memcpy(profiles, cdf_supported_profiles,
+	       sizeof(cdf_supported_profiles));
+	for (i = 0; i < CDF_PROFILES_COUNT; ++i) {
+		/*
+		 * Reset the current profile bit,
+		 * because it might be set from the previous one
+		 */
+		profiles[i].current_p = 0;
+		if (be16_to_cpu(profiles[i].profile) == current_media_type) {
+			DBG(common, "Fill current profile: curr=(%04Xh)\n",
+			    be16_to_cpu(profiles[i].profile));
+			profiles[i].current_p = 1;
+		}
+	}
+}
+
+static int do_get_configuration(struct fsg_common *common,
+				struct fsg_buffhd *bh)
+{
+	struct fsg_lun *curlun = common->curlun;
+	int i;
+	struct cdb_get_configuration *cdb =
+		(struct cdb_get_configuration *)common->cmnd;
+	size_t buffer_size = sizeof(struct feature_header);
+	size_t generic_desc_size = sizeof(struct cdb_ft_generic);
+	struct feature_header *ret_header = (struct feature_header *)bh->buf;
+	u8 *ret_data = ((u8 *)ret_header) + buffer_size;
+
+	LDBG(curlun, "Requesting features from 0x%04X, with RT flag 0x%02X\n",
+	     be16_to_cpu(cdb->sfn), cdb->rt);
+
+	if (!common->curlun || !common->curlun->cdrom)
+		return -EINVAL;
+
+	/* Go over *all* features, and copy them according to RT value */
+	for (i = 0; i < ARRAY_SIZE(features_table); ++i) {
+		struct cdb_ft_generic *generic =
+			(struct cdb_ft_generic *)&features_table[i];
+		struct cdr_features *feature = &features_table[i];
+
+		if (feature->populate != NULL)
+			feature->populate(common, &feature);
+
+		// a) RT is 0x00 and feature's code >= SFN
+		// b) RT is 0x01, feature's code >= SFN and feature has 'current' bit set
+		// c) RT is 0x02 and feature's code == SFN
+
+		if (be16_to_cpu(generic->code) >= be16_to_cpu(cdb->sfn)) {
+			if ((cdb->rt == CDR_CFG_RT_FULL) ||
+			    (cdb->rt == CDR_CFG_RT_CURRENT &&
+			     generic->vpc.cur) ||
+			    (cdb->rt == CDR_CFG_RT_SPECIFIED_SFN &&
+			     be16_to_cpu(generic->code) ==
+				     be16_to_cpu(cdb->sfn))) {
+				LDBG(curlun, "Copying feature 0x%04X\n",
+				     be16_to_cpu(generic->code));
+
+				memset(ret_data, 0,
+				       (generic->length + generic_desc_size));
+				/* Copy feature */
+				memcpy(ret_data, feature,
+				       (generic->length + generic_desc_size));
+				buffer_size +=
+					(generic->length + generic_desc_size);
+				ret_data +=
+					(generic->length + generic_desc_size);
+
+				/* Break the loop if RT is CDR_CFG_RT_SPECIFIED_SFN */
+				if (cdb->rt == CDR_CFG_RT_SPECIFIED_SFN) {
+					LDBG(curlun,
+					     "Got the feature we wanted (0x%04X), breaking the loop\n",
+					     be16_to_cpu(cdb->sfn));
+					break;
+				}
+			}
+		}
+	}
+
+	memset(ret_header, 0, sizeof(struct feature_header));
+	/* Header */
+	ret_header->data_len = cpu_to_be32(buffer_size - generic_desc_size);
+	ret_header->curr_profile =
+		cpu_to_be16(cdr_guess_medium_type(common));
+
+	dump_msg(common, "feature header", (u8 *)ret_header,
+		 sizeof(struct feature_header));
+
+	dump_msg(common, "features table", (u8 *)bh->buf, buffer_size);
+
+	common->data_size_to_handle = buffer_size;
+	return 0;
+}
 
 /*-------------------------------------------------------------------------*/
 
@@ -1842,7 +2331,105 @@ static int check_command_size_in_blocks(struct fsg_common *common,
 			mask, needs_medium, name);
 }
 
-static int do_scsi_command(struct fsg_common *common)
+static struct cdb_command_check cdb_checker_table[] = {
+	{ CDB_REG_CHECKER(INQUIRY, 6, CDB_SIZE_FIELD_4, DATA_DIR_TO_HOST,
+			  0x0010, MEDIUM_OPTIONAL) },
+	{ CDB_REG_CHECKER(MODE_SELECT, 6, CDB_SIZE_FIELD_4, DATA_DIR_FROM_HOST,
+			  0x0012, MEDIUM_OPTIONAL) },
+	{ CDB_REG_CHECKER(MODE_SELECT_10, 10, CDB_SIZE_FIELD_7,
+			  DATA_DIR_FROM_HOST, 0x0182, MEDIUM_OPTIONAL) },
+	{ CDB_REG_CHECKER(MODE_SENSE, 6, CDB_SIZE_FIELD_4, DATA_DIR_TO_HOST,
+			  0x0016, MEDIUM_OPTIONAL) },
+	{ CDB_REG_CHECKER(MODE_SENSE_10, 10, CDB_SIZE_FIELD_7, DATA_DIR_TO_HOST,
+			  0x186, MEDIUM_OPTIONAL) },
+	{ CDB_REG_CHECKER(ALLOW_MEDIUM_REMOVAL, 6, CDB_NO_SIZE_FIELD,
+			  DATA_DIR_NONE, 0x0010, MEDIUM_OPTIONAL) },
+	{ CDB_REG_CHECKER_BLK(READ_6, 6, CDB_SIZE_FIELD_4, DATA_DIR_TO_HOST,
+			      0x001E, MEDIUM_REQUIRED) },
+	{ CDB_REG_CHECKER_BLK(READ_10, 10, CDB_SIZE_FIELD_7, DATA_DIR_TO_HOST,
+			      0x01BE, MEDIUM_REQUIRED) },
+	{ CDB_REG_CHECKER_BLK(READ_12, 12, CDB_SIZE_FIELD_6, DATA_DIR_TO_HOST,
+			      0x03FE, MEDIUM_REQUIRED) },
+	{ CDB_REG_CHECKER_DS(READ_CAPACITY, 10, CDB_SIZE_MANUAL,
+			     DATA_DIR_TO_HOST, 0x011E, MEDIUM_REQUIRED, 8) },
+	{ CDB_REG_CHECKER(READ_HEADER, 10, CDB_SIZE_FIELD_7, DATA_DIR_TO_HOST,
+			  0x01BE, MEDIUM_REQUIRED) },
+	{ CDB_REG_CHECKER(READ_TOC, 10, CDB_SIZE_FIELD_7, DATA_DIR_TO_HOST,
+			  0x03C7, MEDIUM_REQUIRED) },
+	{ CDB_REG_CHECKER(READ_FORMAT_CAPACITIES, 10, CDB_SIZE_FIELD_7,
+			  DATA_DIR_TO_HOST, 0x0180, MEDIUM_REQUIRED) },
+
+	{ CDB_REG_CHECKER(REQUEST_SENSE, 6, CDB_SIZE_FIELD_4, DATA_DIR_TO_HOST,
+			  0x0010, MEDIUM_OPTIONAL) },
+	{ CDB_REG_CHECKER(START_STOP, 6, CDB_NO_SIZE_FIELD, DATA_DIR_NONE,
+			  0x0012, MEDIUM_OPTIONAL) },
+	{ CDB_REG_CHECKER(SYNCHRONIZE_CACHE, 10, CDB_NO_SIZE_FIELD,
+			  DATA_DIR_NONE, 0x01BC, MEDIUM_REQUIRED) },
+
+	{ CDB_REG_CHECKER(TEST_UNIT_READY, 6, CDB_NO_SIZE_FIELD, DATA_DIR_NONE,
+			  0x0000, MEDIUM_REQUIRED) },
+
+	{ CDB_REG_NO_CHECKER(READ_DISC_INFORMATION, CDB_SIZE_FIELD_7,
+			     DATA_DIR_TO_HOST, MEDIUM_REQUIRED) },
+	{ CDB_REG_NO_CHECKER(GET_CONFIGURATION, CDB_SIZE_FIELD_7,
+			     DATA_DIR_TO_HOST, MEDIUM_REQUIRED) },
+
+	{ CDB_REG_CHECKER_BLK(VERIFY, 10, CDB_NO_SIZE_FIELD, DATA_DIR_NONE,
+			      0x0000, MEDIUM_REQUIRED) },
+	{ CDB_REG_CHECKER_BLK(WRITE_6, 6, CDB_SIZE_FIELD_4, DATA_DIR_FROM_HOST,
+			      0x001E, MEDIUM_REQUIRED) },
+	{ CDB_REG_CHECKER_BLK(WRITE_10, 10, CDB_SIZE_FIELD_7,
+			      DATA_DIR_FROM_HOST, 0x01BE, MEDIUM_REQUIRED) },
+	{ CDB_REG_CHECKER_BLK(WRITE_12, 12, CDB_SIZE_FIELD_6,
+			      DATA_DIR_FROM_HOST, 0x03FE, MEDIUM_REQUIRED) },
+};
+
+static struct cdb_handler cdb_handlers_table[] = {
+	{ CDB_REG_HANDLER_BUFFHD(INQUIRY, &do_inquiry) },
+	{ CDB_REG_HANDLER_BUFFHD(MODE_SELECT, &do_mode_select) },
+	{ CDB_REG_HANDLER_BUFFHD(MODE_SELECT_10, &do_mode_select) },
+	{ CDB_REG_HANDLER_BUFFHD(MODE_SENSE, &do_mode_sense) },
+	{ CDB_REG_HANDLER_BUFFHD(MODE_SENSE_10, &do_mode_sense) },
+	{ CDB_REG_HANDLER(ALLOW_MEDIUM_REMOVAL, &do_prevent_allow) },
+	{ CDB_REG_HANDLER(READ_6, &do_read) },
+	{ CDB_REG_HANDLER(READ_10, &do_read) },
+	{ CDB_REG_HANDLER(READ_12, &do_read) },
+	{ CDB_REG_HANDLER_BUFFHD(READ_CAPACITY, &do_read_capacity) },
+	{ CDB_REG_HANDLER_BUFFHD(READ_HEADER, &do_read_header) },
+	{ CDB_REG_HANDLER_BUFFHD(READ_TOC, &do_read_toc) },
+	{ CDB_REG_HANDLER_BUFFHD(READ_FORMAT_CAPACITIES, &do_read_format_capacities) },
+
+	{ CDB_REG_HANDLER_BUFFHD(REQUEST_SENSE, &do_request_sense) },
+	{ CDB_REG_HANDLER(START_STOP, &do_start_stop) },
+	{ CDB_REG_HANDLER(SYNCHRONIZE_CACHE, &do_synchronize_cache) },
+	{ CDB_REG_HANDLER(TEST_UNIT_READY, NULL) },
+
+	{ CDB_REG_HANDLER_BUFFHD(READ_DISC_INFORMATION, &do_read_disc_info) },
+	{ CDB_REG_HANDLER_BUFFHD(GET_CONFIGURATION, &do_get_configuration) },
+	/*
+	 * Although optional, this command is used by MS-Windows.  We
+	 * support a minimal version: BytChk must be 0.
+	 */
+
+	{ CDB_REG_HANDLER(VERIFY, do_verify) },
+	{ CDB_REG_HANDLER(WRITE_6, do_write) },
+	{ CDB_REG_HANDLER(WRITE_10, do_write) },
+	{ CDB_REG_HANDLER(WRITE_12, do_write) },
+	/*
+	 * Some mandatory commands that we recognize but don't implement.
+	 * They don't mean much in this setting.  It's left as an exercise
+	 * for anyone interested to implement RESERVE and RELEASE in terms
+	 * of Posix locks.
+	 *
+	 * Commands:
+	 *	FORMAT_UNIT
+	 *	RELEASE
+	 *	RESERVE
+	 *	SEND_DIAGNOSTIC
+	 */
+};
+
+static int do_scsi_command_upstream(struct fsg_common *common)
 {
 	struct fsg_buffhd	*bh;
 	int			rc;
@@ -2159,6 +2746,135 @@ unknown_cmnd:
 	return 0;
 }
 
+static int do_scsi_command(struct fsg_common *common)
+{
+	struct fsg_buffhd   *bh;
+	int         rc;
+	int         status = -EINVAL;
+	int         i;
+	static char     unknown[16];
+
+	dump_cdb(common);
+
+	/* The size of both handlers and SCSI-checkers tables must be equal */
+	if (WARN(ARRAY_SIZE(cdb_checker_table) !=
+			 ARRAY_SIZE(cdb_handlers_table),
+		 "The checkers and handlers tables length are not matched!\n")) {
+		pr_err("Invalid cdb handlers initialization.\n");
+		return status;
+	}
+
+	/* Wait for the next buffer to become available for data or status */
+	bh = common->next_buffhd_to_fill;
+	common->next_buffhd_to_drain = bh;
+	rc = sleep_thread(common, false, bh);
+	if (rc)
+		return rc;
+
+	common->phase_error = 0;
+	common->short_packet_received = 0;
+
+	down_read(&common->filesem);    /* We're using the backing file */
+	/* flash all unhandled data */
+	common->data_size_to_handle = 0;
+
+	for (i = 0; i < ARRAY_SIZE(cdb_checker_table); ++i) {
+		const struct cdb_command_check *curr_check =
+			&cdb_checker_table[i];
+		const struct cdb_handler *curr_handler = &cdb_handlers_table[i];
+
+		if (common->cmnd[0] != curr_check->command)
+			continue;
+		if (WARN(curr_check->command != curr_handler->command,
+			 "Invalid CDB handlers initialization. Command not matches\n")) {
+			goto end;
+		}
+
+		// The command was matched. Go to processing
+		switch (curr_check->size_index) {
+		case CDB_NO_SIZE_FIELD:
+			common->data_size_from_cmnd = 0;
+			break;
+		case CDB_SIZE_FIELD_4:
+			common->data_size_from_cmnd =
+				(common->cmnd[CDB_SIZE_FIELD_4] == 0) ?
+				    0xFF :
+				    common->cmnd[CDB_SIZE_FIELD_4];
+			break;
+		case CDB_SIZE_FIELD_6:
+			common->data_size_from_cmnd =
+				get_unaligned_be32(&common->cmnd[CDB_SIZE_FIELD_6]);
+			break;
+		case CDB_SIZE_FIELD_7:
+			common->data_size_from_cmnd =
+				get_unaligned_be16(&common->cmnd[CDB_SIZE_FIELD_7]);
+			break;
+		case CDB_SIZE_MANUAL:
+			common->data_size_from_cmnd =
+				curr_check->data_size_manual;
+			break;
+		default:
+			// should never happen
+			pr_err("error of get kind size field\n");
+			goto end;
+		}
+
+		if (curr_check->do_check_command) {
+			status = curr_check->do_check_command(common,
+				curr_check->size, curr_check->direction,
+				curr_check->valid_bytes_bitmask,
+				curr_check->medium_required,
+				curr_handler->name);
+		} else {
+			DBG(common, "SCSI command: %s\n", curr_handler->name);
+			status = 0;
+		}
+
+		if (status == 0) {
+			if (curr_handler->type == CDB_HANDLER_COMMON &&
+				curr_handler->do_command) {
+				status = curr_handler->do_command(common);
+			} else if (curr_handler->type ==
+				       CDB_HANDLER_FSG_BUFFHD &&
+				   curr_handler->do_command_with_buffhd !=
+				       NULL) {
+				status =
+				    curr_handler->do_command_with_buffhd(common, bh);
+			}
+		}
+
+		goto end;
+	}
+
+	common->data_size_from_cmnd = 0;
+	sprintf(unknown, "Unknown %02Xh", common->cmnd[0]);
+	status = check_command(common, common->cmnd_size, DATA_DIR_UNKNOWN, ~0,
+				   MEDIUM_OPTIONAL, unknown);
+	if (status == 0) {
+		common->curlun->sense_data = SS_INVALID_COMMAND;
+		status = -EINVAL;
+	}
+
+end:
+	up_read(&common->filesem);
+
+	if (status == -EINTR || signal_pending(current))
+		return -EINTR;
+
+	/* Set up the single status buffer for finish_reply() */
+	if (status == -EINVAL)
+		status = 0;     /* Error reply length */
+	if (status == 0 && common->data_dir == DATA_DIR_TO_HOST) {
+		common->data_size_to_handle =
+			min_t(u32, common->data_size_to_handle,
+				  common->data_size_from_cmnd);
+		bh->inreq->length = common->data_size_to_handle;
+		bh->state = BUF_STATE_FULL;
+		common->residue -= common->data_size_to_handle;
+	}               /* Otherwise it's already set */
+
+	return 0;
+}
 
 /*-------------------------------------------------------------------------*/
 
@@ -2662,15 +3378,10 @@ static ssize_t forced_eject_store(struct device *dev,
 }
 
 static DEVICE_ATTR_RW(nofua);
+/* mode wil be set in fsg_lun_attr_is_visible() */
+static DEVICE_ATTR(ro, 0, ro_show, ro_store);
+static DEVICE_ATTR(file, 0, file_show, file_store);
 static DEVICE_ATTR_WO(forced_eject);
-
-/*
- * Mode of the ro and file attribute files will be overridden in
- * fsg_lun_dev_is_visible() depending on if this is a cdrom, or if it is a
- * removable device.
- */
-static DEVICE_ATTR_RW(ro);
-static DEVICE_ATTR_RW(file);
 
 /****************************** FSG COMMON ******************************/
 
@@ -3250,6 +3961,13 @@ static ssize_t fsg_lun_opts_forced_eject_store(struct config_item *item,
 
 CONFIGFS_ATTR_WO(fsg_lun_opts_, forced_eject);
 
+static ssize_t fsg_lun_opts_stats_show(struct config_item *item, char *page)
+{
+	return fsg_show_stats(to_fsg_lun_opts(item)->lun, page);
+}
+
+CONFIGFS_ATTR_RO(fsg_lun_opts_, stats);
+
 static struct configfs_attribute *fsg_lun_attrs[] = {
 	&fsg_lun_opts_attr_file,
 	&fsg_lun_opts_attr_ro,
@@ -3258,6 +3976,7 @@ static struct configfs_attribute *fsg_lun_attrs[] = {
 	&fsg_lun_opts_attr_nofua,
 	&fsg_lun_opts_attr_inquiry_string,
 	&fsg_lun_opts_attr_forced_eject,
+	&fsg_lun_opts_attr_stats,
 	NULL,
 };
 

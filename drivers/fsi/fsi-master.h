@@ -111,7 +111,6 @@
 
 /* fsi-master definition and flags */
 #define FSI_MASTER_FLAG_SWCLOCK		0x1
-#define FSI_MASTER_FLAG_I2CR		0x2
 
 /*
  * Structures and function prototypes
@@ -137,7 +136,7 @@ struct fsi_master {
 				       u8 t_send_delay, u8 t_echo_delay);
 };
 
-#define to_fsi_master(d) container_of(d, struct fsi_master, dev)
+#define dev_to_fsi_master(d) container_of(d, struct fsi_master, dev)
 
 /**
  * fsi_master registration & lifetime: the fsi_master_register() and

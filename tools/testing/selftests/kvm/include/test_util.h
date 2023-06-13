@@ -63,10 +63,8 @@ void test_assert(bool exp, const char *exp_str,
 		    #a, #b, #a, (unsigned long) __a, #b, (unsigned long) __b); \
 } while (0)
 
-#define TEST_FAIL(fmt, ...) do { \
-	TEST_ASSERT(false, fmt, ##__VA_ARGS__); \
-	__builtin_unreachable(); \
-} while (0)
+#define TEST_FAIL(fmt, ...) \
+	TEST_ASSERT(false, fmt, ##__VA_ARGS__)
 
 size_t parse_size(const char *size);
 

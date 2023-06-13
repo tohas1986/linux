@@ -4,7 +4,7 @@
 $id: http://devicetree.org/schemas/usb/generic-ohci.yaml#
 $schema: http://devicetree.org/meta-schemas/core.yaml#
 
-title: USB OHCI Controller
+title: USB OHCI Controller Device Tree Bindings
 
 allOf:
   - $ref: "usb-hcd.yaml"

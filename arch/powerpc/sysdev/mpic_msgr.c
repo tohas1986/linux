@@ -121,7 +121,6 @@ static unsigned int mpic_msgr_number_of_blocks(void)
 
 			count += 1;
 		}
-		of_node_put(aliases);
 	}
 
 	return count;
@@ -145,18 +144,12 @@ static int mpic_msgr_block_number(struct device_node *node)
 
 	for (index = 0; index < number_of_blocks; ++index) {
 		struct property *prop;
-		struct device_node *tn;
 
 		snprintf(buf, sizeof(buf), "mpic-msgr-block%d", index);
 		prop = of_find_property(aliases, buf, NULL);
-		tn = of_find_node_by_path(prop->value);
-		if (node == tn) {
-			of_node_put(tn);
+		if (node == of_find_node_by_path(prop->value))
 			break;
-		}
-		of_node_put(tn);
 	}
-	of_node_put(aliases);
 
 	return index == number_of_blocks ? -1 : index;
 }

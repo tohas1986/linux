@@ -6,7 +6,7 @@
 
 #define pr_fmt(fmt) "GICv3: " fmt
 
-#include <linux/iommu.h>
+#include <linux/dma-iommu.h>
 #include <linux/irq.h>
 #include <linux/irqdomain.h>
 #include <linux/kernel.h>

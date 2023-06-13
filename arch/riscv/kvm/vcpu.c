@@ -7,7 +7,6 @@
  */
 
 #include <linux/bitops.h>
-#include <linux/entry-kvm.h>
 #include <linux/errno.h>
 #include <linux/err.h>
 #include <linux/kdebug.h>
@@ -30,7 +29,6 @@ const struct _kvm_stats_desc kvm_vcpu_stats_desc[] = {
 	STATS_DESC_COUNTER(VCPU, mmio_exit_kernel),
 	STATS_DESC_COUNTER(VCPU, csr_exit_user),
 	STATS_DESC_COUNTER(VCPU, csr_exit_kernel),
-	STATS_DESC_COUNTER(VCPU, signal_exits),
 	STATS_DESC_COUNTER(VCPU, exits)
 };
 
@@ -45,23 +43,17 @@ const struct kvm_stats_header kvm_vcpu_stats_header = {
 
 #define KVM_RISCV_BASE_ISA_MASK		GENMASK(25, 0)
 
-#define KVM_ISA_EXT_ARR(ext)		[KVM_RISCV_ISA_EXT_##ext] = RISCV_ISA_EXT_##ext
-
 /* Mapping between KVM ISA Extension ID & Host ISA extension ID */
 static const unsigned long kvm_isa_ext_arr[] = {
-	[KVM_RISCV_ISA_EXT_A] = RISCV_ISA_EXT_a,
-	[KVM_RISCV_ISA_EXT_C] = RISCV_ISA_EXT_c,
-	[KVM_RISCV_ISA_EXT_D] = RISCV_ISA_EXT_d,
-	[KVM_RISCV_ISA_EXT_F] = RISCV_ISA_EXT_f,
-	[KVM_RISCV_ISA_EXT_H] = RISCV_ISA_EXT_h,
-	[KVM_RISCV_ISA_EXT_I] = RISCV_ISA_EXT_i,
-	[KVM_RISCV_ISA_EXT_M] = RISCV_ISA_EXT_m,
-
-	KVM_ISA_EXT_ARR(SSTC),
-	KVM_ISA_EXT_ARR(SVINVAL),
-	KVM_ISA_EXT_ARR(SVPBMT),
-	KVM_ISA_EXT_ARR(ZIHINTPAUSE),
-	KVM_ISA_EXT_ARR(ZICBOM),
+	RISCV_ISA_EXT_a,
+	RISCV_ISA_EXT_c,
+	RISCV_ISA_EXT_d,
+	RISCV_ISA_EXT_f,
+	RISCV_ISA_EXT_h,
+	RISCV_ISA_EXT_i,
+	RISCV_ISA_EXT_m,
+	RISCV_ISA_EXT_SVPBMT,
+	RISCV_ISA_EXT_SSTC,
 };
 
 static unsigned long kvm_riscv_vcpu_base2isa_ext(unsigned long base_ext)
@@ -96,8 +88,6 @@ static bool kvm_riscv_vcpu_isa_disable_allowed(unsigned long ext)
 	case KVM_RISCV_ISA_EXT_I:
 	case KVM_RISCV_ISA_EXT_M:
 	case KVM_RISCV_ISA_EXT_SSTC:
-	case KVM_RISCV_ISA_EXT_SVINVAL:
-	case KVM_RISCV_ISA_EXT_ZIHINTPAUSE:
 		return false;
 	default:
 		break;
@@ -296,15 +286,12 @@ static int kvm_riscv_vcpu_set_reg_config(struct kvm_vcpu *vcpu,
 	if (copy_from_user(&reg_val, uaddr, KVM_REG_SIZE(reg->id)))
 		return -EFAULT;
 
+	/* This ONE REG interface is only defined for single letter extensions */
+	if (fls(reg_val) >= RISCV_ISA_EXT_BASE)
+		return -EINVAL;
+
 	switch (reg_num) {
 	case KVM_REG_RISCV_CONFIG_REG(isa):
-		/*
-		 * This ONE REG interface is only defined for
-		 * single letter extensions.
-		 */
-		if (fls(reg_val) >= RISCV_ISA_EXT_BASE)
-			return -EINVAL;
-
 		if (!vcpu->arch.ran_atleast_once) {
 			/* Ignore the enable/disable request for certain extensions */
 			for (i = 0; i < RISCV_ISA_EXT_BASE; i++) {
@@ -808,15 +795,11 @@ static void kvm_riscv_vcpu_update_config(const unsigned long *isa)
 {
 	u64 henvcfg = 0;
 
-	if (riscv_isa_extension_available(isa, SVPBMT))
+	if (__riscv_isa_extension_available(isa, RISCV_ISA_EXT_SVPBMT))
 		henvcfg |= ENVCFG_PBMTE;
 
-	if (riscv_isa_extension_available(isa, SSTC))
+	if (__riscv_isa_extension_available(isa, RISCV_ISA_EXT_SSTC))
 		henvcfg |= ENVCFG_STCE;
-
-	if (riscv_isa_extension_available(isa, ZICBOM))
-		henvcfg |= (ENVCFG_CBIE | ENVCFG_CBCFE);
-
 	csr_write(CSR_HENVCFG, henvcfg);
 #ifdef CONFIG_32BIT
 	csr_write(CSR_HENVCFGH, henvcfg >> 32);
@@ -986,15 +969,22 @@ int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu *vcpu)
 	run->exit_reason = KVM_EXIT_UNKNOWN;
 	while (ret > 0) {
 		/* Check conditions before entering the guest */
-		ret = xfer_to_guest_mode_handle_work(vcpu);
-		if (!ret)
-			ret = 1;
+		cond_resched();
 
 		kvm_riscv_gstage_vmid_update(vcpu);
 
 		kvm_riscv_check_vcpu_requests(vcpu);
 
 		local_irq_disable();
+
+		/*
+		 * Exit if we have a signal pending so that we can deliver
+		 * the signal to user space.
+		 */
+		if (signal_pending(current)) {
+			ret = -EINTR;
+			run->exit_reason = KVM_EXIT_INTR;
+		}
 
 		/*
 		 * Ensure we set mode to IN_GUEST_MODE after we disable
@@ -1018,8 +1008,7 @@ int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu *vcpu)
 
 		if (ret <= 0 ||
 		    kvm_riscv_gstage_vmid_ver_changed(&vcpu->kvm->arch.vmid) ||
-		    kvm_request_pending(vcpu) ||
-		    xfer_to_guest_mode_work_pending()) {
+		    kvm_request_pending(vcpu)) {
 			vcpu->mode = OUTSIDE_GUEST_MODE;
 			local_irq_enable();
 			kvm_vcpu_srcu_read_lock(vcpu);

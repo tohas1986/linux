@@ -16,9 +16,6 @@
 #include "adf_cfg_common.h"
 #include "adf_cfg_user.h"
 
-#define ADF_CFG_MAX_SECTION 512
-#define ADF_CFG_MAX_KEY_VAL 256
-
 #define DEVICE_NAME "qat_adf_ctl"
 
 static DEFINE_MUTEX(adf_ctl_lock);
@@ -140,11 +137,10 @@ static int adf_copy_key_value_data(struct adf_accel_dev *accel_dev,
 	struct adf_user_cfg_key_val key_val;
 	struct adf_user_cfg_key_val *params_head;
 	struct adf_user_cfg_section section, *section_head;
-	int i, j;
 
 	section_head = ctl_data->config_section;
 
-	for (i = 0; section_head && i < ADF_CFG_MAX_SECTION; i++) {
+	while (section_head) {
 		if (copy_from_user(&section, (void __user *)section_head,
 				   sizeof(*section_head))) {
 			dev_err(&GET_DEV(accel_dev),
@@ -160,7 +156,7 @@ static int adf_copy_key_value_data(struct adf_accel_dev *accel_dev,
 
 		params_head = section.params;
 
-		for (j = 0; params_head && j < ADF_CFG_MAX_KEY_VAL; j++) {
+		while (params_head) {
 			if (copy_from_user(&key_val, (void __user *)params_head,
 					   sizeof(key_val))) {
 				dev_err(&GET_DEV(accel_dev),
@@ -367,7 +363,7 @@ static int adf_ctl_ioctl_get_status(struct file *fp, unsigned int cmd,
 	dev_info.num_logical_accel = hw_data->num_logical_accel;
 	dev_info.banks_per_accel = hw_data->num_banks
 					/ hw_data->num_logical_accel;
-	strscpy(dev_info.name, hw_data->dev_class->name, sizeof(dev_info.name));
+	strlcpy(dev_info.name, hw_data->dev_class->name, sizeof(dev_info.name));
 	dev_info.instance_id = hw_data->instance_id;
 	dev_info.type = hw_data->dev_class->type;
 	dev_info.bus = accel_to_pci_dev(accel_dev)->bus->number;

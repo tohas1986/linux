@@ -168,6 +168,21 @@ struct aspeed_i2c_bus {
 #endif /* CONFIG_I2C_SLAVE */
 };
 
+static bool dump_debug __read_mostly;
+static int dump_debug_bus_id __read_mostly;
+
+#define I2C_HEX_DUMP(bus, addr, flags, buf, len) \
+	do { \
+		if (dump_debug && (bus)->adap.nr == dump_debug_bus_id) { \
+			char dump_info[100] = {0,}; \
+			snprintf(dump_info, sizeof(dump_info), \
+				 "bus_id:%d, addr:0x%02x, flags:0x%02x: ", \
+				 (bus)->adap.nr, addr, flags); \
+			print_hex_dump(KERN_ERR, dump_info, DUMP_PREFIX_NONE, \
+				       16, 1, buf, len, true); \
+		} \
+	} while (0)
+
 static int aspeed_i2c_reset(struct aspeed_i2c_bus *bus);
 
 static int aspeed_i2c_recover_bus(struct aspeed_i2c_bus *bus)
@@ -648,7 +663,7 @@ static irqreturn_t aspeed_i2c_bus_irq(int irq, void *dev_id)
 
 	irq_remaining &= ~irq_handled;
 	if (irq_remaining)
-		dev_err(bus->dev,
+		dev_dbg(bus->dev,
 			"irq handled != irq. expected 0x%08x, but was 0x%08x\n",
 			irq_received, irq_handled);
 
@@ -667,14 +682,26 @@ static int aspeed_i2c_master_xfer(struct i2c_adapter *adap,
 {
 	struct aspeed_i2c_bus *bus = i2c_get_adapdata(adap);
 	unsigned long time_left, flags;
+	int i;
+	u32 command;
 
 	spin_lock_irqsave(&bus->lock, flags);
 	bus->cmd_err = 0;
 
+	/* If state machine is in idle, bus is busy and SCL is low,
+	   then bus is locked, no need to recover it */
+	command = readl(bus->base + ASPEED_I2C_CMD_REG);
+	if (!bus->multi_master &&
+	   (command & ASPEED_I2CD_BUS_BUSY_STS) &&
+	   ((command & ASPEED_I2CD_SCL_LINE_STS) == 0) &&
+	   (((command >> 25 ) & 0x01) == 0x01)) {
+		spin_unlock_irqrestore(&bus->lock, flags);
+		return -EBUSY;
+	}
+
 	/* If bus is busy in a single master environment, attempt recovery. */
 	if (!bus->multi_master &&
-	    (readl(bus->base + ASPEED_I2C_CMD_REG) &
-	     ASPEED_I2CD_BUS_BUSY_STS)) {
+	    (command & ASPEED_I2CD_BUS_BUSY_STS)) {
 		int ret;
 
 		spin_unlock_irqrestore(&bus->lock, flags);
@@ -682,6 +709,12 @@ static int aspeed_i2c_master_xfer(struct i2c_adapter *adap,
 		if (ret)
 			return ret;
 		spin_lock_irqsave(&bus->lock, flags);
+
+		if (readl(bus->base + ASPEED_I2C_CMD_REG) &
+			ASPEED_I2CD_BUS_BUSY_STS) {
+			spin_unlock_irqrestore(&bus->lock, flags);
+			return -EBUSY;
+		}
 	}
 
 	bus->cmd_err = 0;
@@ -716,6 +749,11 @@ static int aspeed_i2c_master_xfer(struct i2c_adapter *adap,
 		spin_unlock_irqrestore(&bus->lock, flags);
 
 		return -ETIMEDOUT;
+	}
+
+	for (i = 0; i < num; i++) {
+		I2C_HEX_DUMP(bus, msgs[i].addr, msgs[i].flags,
+			     msgs[i].buf, msgs[i].len);
 	}
 
 	return bus->master_xfer_result;
@@ -1025,7 +1063,6 @@ static int aspeed_i2c_probe_bus(struct platform_device *pdev)
 	spin_lock_init(&bus->lock);
 	init_completion(&bus->cmd_complete);
 	bus->adap.owner = THIS_MODULE;
-	bus->adap.retries = 0;
 	bus->adap.algo = &aspeed_i2c_algo;
 	bus->adap.dev.parent = &pdev->dev;
 	bus->adap.dev.of_node = pdev->dev.of_node;
@@ -1092,6 +1129,11 @@ static struct platform_driver aspeed_i2c_bus_driver = {
 	},
 };
 module_platform_driver(aspeed_i2c_bus_driver);
+
+module_param_named(dump_debug, dump_debug, bool, 0644);
+MODULE_PARM_DESC(dump_debug, "debug flag for dump printing");
+module_param_named(dump_debug_bus_id, dump_debug_bus_id, int, 0644);
+MODULE_PARM_DESC(dump_debug_bus_id, "bus id for dump debug printing");
 
 MODULE_AUTHOR("Brendan Higgins <brendanhiggins@google.com>");
 MODULE_DESCRIPTION("Aspeed I2C Bus Driver");

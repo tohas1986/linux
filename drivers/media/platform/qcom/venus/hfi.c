@@ -569,6 +569,8 @@ irqreturn_t hfi_isr(int irq, void *dev)
 
 int hfi_create(struct venus_core *core, const struct hfi_core_ops *ops)
 {
+	int ret;
+
 	if (!ops)
 		return -EINVAL;
 
@@ -577,8 +579,9 @@ int hfi_create(struct venus_core *core, const struct hfi_core_ops *ops)
 	core->state = CORE_UNINIT;
 	init_completion(&core->done);
 	pkt_set_version(core->res->hfi_version);
+	ret = venus_hfi_create(core);
 
-	return venus_hfi_create(core);
+	return ret;
 }
 
 void hfi_destroy(struct venus_core *core)

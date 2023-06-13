@@ -1720,8 +1720,10 @@ static int rt5631_i2c_probe(struct i2c_client *i2c)
 	return ret;
 }
 
-static void rt5631_i2c_remove(struct i2c_client *client)
-{}
+static int rt5631_i2c_remove(struct i2c_client *client)
+{
+	return 0;
+}
 
 static struct i2c_driver rt5631_i2c_driver = {
 	.driver = {

@@ -10,7 +10,6 @@
 #include <linux/entry-common.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
-#include <linux/kexec.h>
 #include <linux/module.h>
 #include <linux/extable.h>
 #include <linux/mm.h>
@@ -247,9 +246,6 @@ void __noreturn die(const char *str, struct pt_regs *regs)
 
 	oops_exit();
 
-	if (regs && kexec_should_crash(current))
-		crash_kexec(regs);
-
 	if (in_interrupt())
 		panic("Fatal exception in interrupt");
 
@@ -378,29 +374,6 @@ asmlinkage void noinstr do_ale(struct pt_regs *regs)
 	irqentry_exit(regs, state);
 }
 
-#ifdef CONFIG_GENERIC_BUG
-int is_valid_bugaddr(unsigned long addr)
-{
-	return 1;
-}
-#endif /* CONFIG_GENERIC_BUG */
-
-static void bug_handler(struct pt_regs *regs)
-{
-	switch (report_bug(regs->csr_era, regs)) {
-	case BUG_TRAP_TYPE_BUG:
-	case BUG_TRAP_TYPE_NONE:
-		die_if_kernel("Oops - BUG", regs);
-		force_sig(SIGTRAP);
-		break;
-
-	case BUG_TRAP_TYPE_WARN:
-		/* Skip the BUG instruction and continue */
-		regs->csr_era += LOONGARCH_INSN_SIZE;
-		break;
-	}
-}
-
 asmlinkage void noinstr do_bp(struct pt_regs *regs)
 {
 	bool user = user_mode(regs);
@@ -454,7 +427,8 @@ asmlinkage void noinstr do_bp(struct pt_regs *regs)
 
 	switch (bcode) {
 	case BRK_BUG:
-		bug_handler(regs);
+		die_if_kernel("Kernel bug detected", regs);
+		force_sig(SIGTRAP);
 		break;
 	case BRK_DIVZERO:
 		die_if_kernel("Break instruction in kernel code", regs);
@@ -645,6 +619,9 @@ asmlinkage void noinstr do_vint(struct pt_regs *regs, unsigned long sp)
 
 	irqentry_exit(regs, state);
 }
+
+extern void tlb_init(int cpu);
+extern void cache_error_setup(void);
 
 unsigned long eentry;
 unsigned long tlbrentry;

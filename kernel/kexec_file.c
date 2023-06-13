@@ -339,7 +339,7 @@ SYSCALL_DEFINE5(kexec_file_load, int, kernel_fd, int, initrd_fd,
 
 	image = NULL;
 
-	if (!kexec_trylock())
+	if (!mutex_trylock(&kexec_mutex))
 		return -EBUSY;
 
 	dest_image = &kexec_image;
@@ -411,7 +411,7 @@ out:
 	if ((flags & KEXEC_FILE_ON_CRASH) && kexec_crash_image)
 		arch_kexec_protect_crashkres();
 
-	kexec_unlock();
+	mutex_unlock(&kexec_mutex);
 	kimage_free(image);
 	return ret;
 }

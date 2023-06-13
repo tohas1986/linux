@@ -2465,7 +2465,7 @@ static int unittest_i2c_bus_probe(struct platform_device *pdev)
 	adap = &std->adap;
 	i2c_set_adapdata(adap, std);
 	adap->nr = -1;
-	strscpy(adap->name, pdev->name, sizeof(adap->name));
+	strlcpy(adap->name, pdev->name, sizeof(adap->name));
 	adap->class = I2C_CLASS_DEPRECATED;
 	adap->algo = &unittest_i2c_algo;
 	adap->dev.parent = dev;
@@ -2524,12 +2524,13 @@ static int unittest_i2c_dev_probe(struct i2c_client *client,
 	return 0;
 };
 
-static void unittest_i2c_dev_remove(struct i2c_client *client)
+static int unittest_i2c_dev_remove(struct i2c_client *client)
 {
 	struct device *dev = &client->dev;
 	struct device_node *np = client->dev.of_node;
 
 	dev_dbg(dev, "%s for node @%pOF\n", __func__, np);
+	return 0;
 }
 
 static const struct i2c_device_id unittest_i2c_dev_id[] = {
@@ -2600,7 +2601,7 @@ static int unittest_i2c_mux_probe(struct i2c_client *client,
 	return 0;
 };
 
-static void unittest_i2c_mux_remove(struct i2c_client *client)
+static int unittest_i2c_mux_remove(struct i2c_client *client)
 {
 	struct device *dev = &client->dev;
 	struct device_node *np = client->dev.of_node;
@@ -2608,6 +2609,7 @@ static void unittest_i2c_mux_remove(struct i2c_client *client)
 
 	dev_dbg(dev, "%s for node @%pOF\n", __func__, np);
 	i2c_mux_del_adapters(muxc);
+	return 0;
 }
 
 static const struct i2c_device_id unittest_i2c_mux_id[] = {
@@ -3464,9 +3466,6 @@ static int __init of_unittest(void)
 	int res;
 
 	pr_info("start of unittest - you will see error messages\n");
-
-	/* Taint the kernel so we know we've run tests. */
-	add_taint(TAINT_TEST, LOCKDEP_STILL_OK);
 
 	/* adding data for unittest */
 

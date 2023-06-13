@@ -724,6 +724,7 @@ struct nfsd4_compoundargs {
 	u32				opcnt;
 	struct nfsd4_op			*ops;
 	struct nfsd4_op			iops[8];
+	int				cachetype;
 };
 
 struct nfsd4_compoundres {
@@ -732,8 +733,8 @@ struct nfsd4_compoundres {
 	struct svc_rqst *		rqstp;
 
 	__be32				*statusp;
-	char *				tag;
 	u32				taglen;
+	char *				tag;
 	u32				opcnt;
 
 	struct nfsd4_compound_state	cstate;
@@ -888,8 +889,7 @@ struct nfsd4_operation {
 	u32 op_flags;
 	char *op_name;
 	/* Try to get response size before operation */
-	u32 (*op_rsize_bop)(const struct svc_rqst *rqstp,
-			const struct nfsd4_op *op);
+	u32 (*op_rsize_bop)(struct svc_rqst *, struct nfsd4_op *);
 	void (*op_get_currentstateid)(struct nfsd4_compound_state *,
 			union nfsd4_op_u *);
 	void (*op_set_currentstateid)(struct nfsd4_compound_state *,

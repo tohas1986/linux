@@ -209,14 +209,16 @@ posix_open_ret:
 }
 #endif /* CONFIG_CIFS_ALLOW_INSECURE_LEGACY */
 
-static int cifs_nt_open(const char *full_path, struct inode *inode, struct cifs_sb_info *cifs_sb,
-			struct cifs_tcon *tcon, unsigned int f_flags, __u32 *oplock,
-			struct cifs_fid *fid, unsigned int xid, struct cifs_open_info_data *buf)
+static int
+cifs_nt_open(const char *full_path, struct inode *inode, struct cifs_sb_info *cifs_sb,
+	     struct cifs_tcon *tcon, unsigned int f_flags, __u32 *oplock,
+	     struct cifs_fid *fid, unsigned int xid)
 {
 	int rc;
 	int desired_access;
 	int disposition;
 	int create_options = CREATE_NOT_DIR;
+	FILE_ALL_INFO *buf;
 	struct TCP_Server_Info *server = tcon->ses->server;
 	struct cifs_open_parms oparms;
 
@@ -253,6 +255,10 @@ static int cifs_nt_open(const char *full_path, struct inode *inode, struct cifs_
 
 	/* BB pass O_SYNC flag through on file attributes .. BB */
 
+	buf = kmalloc(sizeof(FILE_ALL_INFO), GFP_KERNEL);
+	if (!buf)
+		return -ENOMEM;
+
 	/* O_SYNC also has bit for O_DSYNC so following check picks up either */
 	if (f_flags & O_SYNC)
 		create_options |= CREATE_WRITE_THROUGH;
@@ -270,8 +276,9 @@ static int cifs_nt_open(const char *full_path, struct inode *inode, struct cifs_
 	oparms.reconnect = false;
 
 	rc = server->ops->open(xid, &oparms, oplock, buf);
+
 	if (rc)
-		return rc;
+		goto out;
 
 	/* TODO: Add support for calling posix query info but with passing in fid */
 	if (tcon->unix_ext)
@@ -287,6 +294,8 @@ static int cifs_nt_open(const char *full_path, struct inode *inode, struct cifs_
 			rc = -EOPENSTALE;
 	}
 
+out:
+	kfree(buf);
 	return rc;
 }
 
@@ -316,9 +325,9 @@ cifs_down_write(struct rw_semaphore *sem)
 
 static void cifsFileInfo_put_work(struct work_struct *work);
 
-struct cifsFileInfo *cifs_new_fileinfo(struct cifs_fid *fid, struct file *file,
-				       struct tcon_link *tlink, __u32 oplock,
-				       const char *symlink_target)
+struct cifsFileInfo *
+cifs_new_fileinfo(struct cifs_fid *fid, struct file *file,
+		  struct tcon_link *tlink, __u32 oplock)
 {
 	struct dentry *dentry = file_dentry(file);
 	struct inode *inode = d_inode(dentry);
@@ -336,15 +345,6 @@ struct cifsFileInfo *cifs_new_fileinfo(struct cifs_fid *fid, struct file *file,
 	if (!fdlocks) {
 		kfree(cfile);
 		return NULL;
-	}
-
-	if (symlink_target) {
-		cfile->symlink_target = kstrdup(symlink_target, GFP_KERNEL);
-		if (!cfile->symlink_target) {
-			kfree(fdlocks);
-			kfree(cfile);
-			return NULL;
-		}
 	}
 
 	INIT_LIST_HEAD(&fdlocks->locks);
@@ -440,7 +440,6 @@ static void cifsFileInfo_put_final(struct cifsFileInfo *cifs_file)
 	cifs_put_tlink(cifs_file->tlink);
 	dput(cifs_file->dentry);
 	cifs_sb_deactive(sb);
-	kfree(cifs_file->symlink_target);
 	kfree(cifs_file);
 }
 
@@ -489,7 +488,7 @@ void _cifsFileInfo_put(struct cifsFileInfo *cifs_file,
 	struct cifsInodeInfo *cifsi = CIFS_I(inode);
 	struct super_block *sb = inode->i_sb;
 	struct cifs_sb_info *cifs_sb = CIFS_SB(sb);
-	struct cifs_fid fid = {};
+	struct cifs_fid fid;
 	struct cifs_pending_open open;
 	bool oplock_break_cancelled;
 
@@ -571,9 +570,8 @@ int cifs_open(struct inode *inode, struct file *file)
 	void *page;
 	const char *full_path;
 	bool posix_open_ok = false;
-	struct cifs_fid fid = {};
+	struct cifs_fid fid;
 	struct cifs_pending_open open;
-	struct cifs_open_info_data data = {};
 
 	xid = get_xid();
 
@@ -664,15 +662,15 @@ int cifs_open(struct inode *inode, struct file *file)
 		if (server->ops->get_lease_key)
 			server->ops->get_lease_key(inode, &fid);
 
-		rc = cifs_nt_open(full_path, inode, cifs_sb, tcon, file->f_flags, &oplock, &fid,
-				  xid, &data);
+		rc = cifs_nt_open(full_path, inode, cifs_sb, tcon,
+				  file->f_flags, &oplock, &fid, xid);
 		if (rc) {
 			cifs_del_pending_open(&open);
 			goto out;
 		}
 	}
 
-	cfile = cifs_new_fileinfo(&fid, file, tlink, oplock, data.symlink_target);
+	cfile = cifs_new_fileinfo(&fid, file, tlink, oplock);
 	if (cfile == NULL) {
 		if (server->ops->close)
 			server->ops->close(xid, tcon, &fid);
@@ -714,7 +712,6 @@ out:
 	free_dentry_path(page);
 	free_xid(xid);
 	cifs_put_tlink(tlink);
-	cifs_free_open_info(&data);
 	return rc;
 }
 
@@ -2434,16 +2431,12 @@ cifs_writev_complete(struct work_struct *work)
 struct cifs_writedata *
 cifs_writedata_alloc(unsigned int nr_pages, work_func_t complete)
 {
-	struct cifs_writedata *writedata = NULL;
 	struct page **pages =
 		kcalloc(nr_pages, sizeof(struct page *), GFP_NOFS);
-	if (pages) {
-		writedata = cifs_writedata_direct_alloc(pages, complete);
-		if (!writedata)
-			kvfree(pages);
-	}
+	if (pages)
+		return cifs_writedata_direct_alloc(pages, complete);
 
-	return writedata;
+	return NULL;
 }
 
 struct cifs_writedata *
@@ -3303,9 +3296,6 @@ cifs_write_from_iter(loff_t offset, size_t len, struct iov_iter *from,
 					     cifs_uncached_writev_complete);
 			if (!wdata) {
 				rc = -ENOMEM;
-				for (i = 0; i < nr_pages; i++)
-					put_page(pagevec[i]);
-				kvfree(pagevec);
 				add_credits_and_wake_if(server, credits, 0);
 				break;
 			}
@@ -3532,7 +3522,7 @@ static ssize_t __cifs_writev(
 		ctx->iter = *from;
 		ctx->len = len;
 	} else {
-		rc = setup_aio_ctx_iter(ctx, from, ITER_SOURCE);
+		rc = setup_aio_ctx_iter(ctx, from, WRITE);
 		if (rc) {
 			kref_put(&ctx->refcount, cifs_aio_ctx_release);
 			return rc;
@@ -3880,7 +3870,7 @@ uncached_fill_pages(struct TCP_Server_Info *server,
 		rdata->got_bytes += result;
 	}
 
-	return result != -ECONNABORTED && rdata->got_bytes > 0 ?
+	return rdata->got_bytes > 0 && result != -ECONNABORTED ?
 						rdata->got_bytes : result;
 }
 
@@ -4276,7 +4266,7 @@ static ssize_t __cifs_readv(
 		ctx->iter = *to;
 		ctx->len = len;
 	} else {
-		rc = setup_aio_ctx_iter(ctx, to, ITER_DEST);
+		rc = setup_aio_ctx_iter(ctx, to, READ);
 		if (rc) {
 			kref_put(&ctx->refcount, cifs_aio_ctx_release);
 			return rc;
@@ -4656,7 +4646,7 @@ readpages_fill_pages(struct TCP_Server_Info *server,
 		rdata->got_bytes += result;
 	}
 
-	return result != -ECONNABORTED && rdata->got_bytes > 0 ?
+	return rdata->got_bytes > 0 && result != -ECONNABORTED ?
 						rdata->got_bytes : result;
 }
 

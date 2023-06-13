@@ -196,7 +196,6 @@ int idxd_wq_enable(struct idxd_wq *wq)
 	}
 
 	wq->state = IDXD_WQ_ENABLED;
-	set_bit(wq->id, idxd->wq_enable_map);
 	dev_dbg(dev, "WQ %d enabled\n", wq->id);
 	return 0;
 }
@@ -224,7 +223,6 @@ int idxd_wq_disable(struct idxd_wq *wq, bool reset_config)
 
 	if (reset_config)
 		idxd_wq_disable_cleanup(wq);
-	clear_bit(wq->id, idxd->wq_enable_map);
 	wq->state = IDXD_WQ_DISABLED;
 	dev_dbg(dev, "WQ %d disabled\n", wq->id);
 	return 0;
@@ -260,6 +258,7 @@ void idxd_wq_reset(struct idxd_wq *wq)
 	operand = BIT(wq->id % 16) | ((wq->id / 16) << 16);
 	idxd_cmd_exec(idxd, IDXD_CMD_RESET_WQ, operand, NULL);
 	idxd_wq_disable_cleanup(wq);
+	wq->state = IDXD_WQ_DISABLED;
 }
 
 int idxd_wq_map_portal(struct idxd_wq *wq)
@@ -379,20 +378,17 @@ static void idxd_wq_disable_cleanup(struct idxd_wq *wq)
 	struct idxd_device *idxd = wq->idxd;
 
 	lockdep_assert_held(&wq->wq_lock);
-	wq->state = IDXD_WQ_DISABLED;
 	memset(wq->wqcfg, 0, idxd->wqcfg_size);
 	wq->type = IDXD_WQT_NONE;
 	wq->threshold = 0;
 	wq->priority = 0;
+	wq->ats_dis = 0;
 	wq->enqcmds_retries = IDXD_ENQCMDS_RETRIES;
 	clear_bit(WQ_FLAG_DEDICATED, &wq->flags);
 	clear_bit(WQ_FLAG_BLOCK_ON_FAULT, &wq->flags);
-	clear_bit(WQ_FLAG_ATS_DISABLE, &wq->flags);
 	memset(wq->name, 0, WQ_NAME_SIZE);
 	wq->max_xfer_bytes = WQ_DEFAULT_MAX_XFER;
 	idxd_wq_set_max_batch_size(idxd->data->type, wq, WQ_DEFAULT_MAX_BATCH);
-	if (wq->opcap_bmap)
-		bitmap_copy(wq->opcap_bmap, idxd->opcap_bmap, IDXD_MAX_OPCAP_BITS);
 }
 
 static void idxd_wq_device_reset_cleanup(struct idxd_wq *wq)
@@ -709,8 +705,6 @@ static void idxd_groups_clear_state(struct idxd_device *idxd)
 			group->tc_a = -1;
 			group->tc_b = -1;
 		}
-		group->desc_progress_limit = 0;
-		group->batch_progress_limit = 0;
 	}
 }
 
@@ -775,10 +769,10 @@ static void idxd_group_config_write(struct idxd_group *group)
 
 	/* setup GRPFLAGS */
 	grpcfg_offset = GRPFLGCFG_OFFSET(idxd, group->id);
-	iowrite64(group->grpcfg.flags.bits, idxd->reg_base + grpcfg_offset);
-	dev_dbg(dev, "GRPFLAGS flags[%d: %#x]: %#llx\n",
+	iowrite32(group->grpcfg.flags.bits, idxd->reg_base + grpcfg_offset);
+	dev_dbg(dev, "GRPFLAGS flags[%d: %#x]: %#x\n",
 		group->id, grpcfg_offset,
-		ioread64(idxd->reg_base + grpcfg_offset));
+		ioread32(idxd->reg_base + grpcfg_offset));
 }
 
 static int idxd_groups_config_write(struct idxd_device *idxd)
@@ -821,7 +815,7 @@ static int idxd_wq_config_write(struct idxd_wq *wq)
 	struct idxd_device *idxd = wq->idxd;
 	struct device *dev = &idxd->pdev->dev;
 	u32 wq_offset;
-	int i, n;
+	int i;
 
 	if (!wq->group)
 		return 0;
@@ -873,22 +867,11 @@ static int idxd_wq_config_write(struct idxd_wq *wq)
 		wq->wqcfg->bof = 1;
 
 	if (idxd->hw.wq_cap.wq_ats_support)
-		wq->wqcfg->wq_ats_disable = test_bit(WQ_FLAG_ATS_DISABLE, &wq->flags);
+		wq->wqcfg->wq_ats_disable = wq->ats_dis;
 
 	/* bytes 12-15 */
 	wq->wqcfg->max_xfer_shift = ilog2(wq->max_xfer_bytes);
 	idxd_wqcfg_set_max_batch_shift(idxd->data->type, wq->wqcfg, ilog2(wq->max_batch_size));
-
-	/* bytes 32-63 */
-	if (idxd->hw.wq_cap.op_config && wq->opcap_bmap) {
-		memset(wq->wqcfg->op_config, 0, IDXD_MAX_OPCAP_BITS / 8);
-		for_each_set_bit(n, wq->opcap_bmap, IDXD_MAX_OPCAP_BITS) {
-			int pos = n % BITS_PER_LONG_LONG;
-			int idx = n / BITS_PER_LONG_LONG;
-
-			wq->wqcfg->op_config[idx] |= BIT(pos);
-		}
-	}
 
 	dev_dbg(dev, "WQ %d CFGs\n", wq->id);
 	for (i = 0; i < WQCFG_STRIDES(idxd); i++) {
@@ -939,9 +922,6 @@ static void idxd_group_flags_setup(struct idxd_device *idxd)
 			group->grpcfg.flags.rdbufs_allowed = group->rdbufs_allowed;
 		else
 			group->grpcfg.flags.rdbufs_allowed = idxd->max_rdbufs;
-
-		group->grpcfg.flags.desc_progress_limit = group->desc_progress_limit;
-		group->grpcfg.flags.batch_progress_limit = group->batch_progress_limit;
 	}
 }
 
@@ -1124,8 +1104,8 @@ static void idxd_group_load_config(struct idxd_group *group)
 	}
 
 	grpcfg_offset = GRPFLGCFG_OFFSET(idxd, group->id);
-	group->grpcfg.flags.bits = ioread64(idxd->reg_base + grpcfg_offset);
-	dev_dbg(dev, "GRPFLAGS flags[%d: %#x]: %#llx\n",
+	group->grpcfg.flags.bits = ioread32(idxd->reg_base + grpcfg_offset);
+	dev_dbg(dev, "GRPFLAGS flags[%d: %#x]: %#x\n",
 		group->id, grpcfg_offset, group->grpcfg.flags.bits);
 }
 
@@ -1173,19 +1153,8 @@ static void idxd_flush_pending_descs(struct idxd_irq_entry *ie)
 	spin_unlock(&ie->list_lock);
 
 	list_for_each_entry_safe(desc, itr, &flist, list) {
-		struct dma_async_tx_descriptor *tx;
-
 		list_del(&desc->list);
 		ctype = desc->completion->status ? IDXD_COMPLETE_NORMAL : IDXD_COMPLETE_ABORT;
-		/*
-		 * wq is being disabled. Any remaining descriptors are
-		 * likely to be stuck and can be dropped. callback could
-		 * point to code that is no longer accessible, for example
-		 * if dmatest module has been unloaded.
-		 */
-		tx = &desc->txd;
-		tx->callback = NULL;
-		tx->callback_result = NULL;
 		idxd_dma_complete_txd(desc, ctype, true);
 	}
 }
@@ -1402,7 +1371,8 @@ err_res_alloc:
 err_irq:
 	idxd_wq_unmap_portal(wq);
 err_map_portal:
-	if (idxd_wq_disable(wq, false))
+	rc = idxd_wq_disable(wq, false);
+	if (rc < 0)
 		dev_dbg(dev, "wq %s disable failed\n", dev_name(wq_confdev(wq)));
 err:
 	return rc;
@@ -1419,11 +1389,11 @@ void drv_disable_wq(struct idxd_wq *wq)
 		dev_warn(dev, "Clients has claim on wq %d: %d\n",
 			 wq->id, idxd_wq_refcount(wq));
 
+	idxd_wq_free_resources(wq);
 	idxd_wq_unmap_portal(wq);
 	idxd_wq_drain(wq);
 	idxd_wq_free_irq(wq);
 	idxd_wq_reset(wq);
-	idxd_wq_free_resources(wq);
 	percpu_ref_exit(&wq->wq_active);
 	wq->type = IDXD_WQT_NONE;
 	wq->client_count = 0;

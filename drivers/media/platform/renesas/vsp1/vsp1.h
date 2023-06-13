@@ -22,7 +22,6 @@
 struct clk;
 struct device;
 struct rcar_fcp_device;
-struct reset_control;
 
 struct vsp1_drm;
 struct vsp1_entity;
@@ -55,7 +54,6 @@ struct vsp1_uif;
 #define VSP1_HAS_HGT		BIT(8)
 #define VSP1_HAS_BRS		BIT(9)
 #define VSP1_HAS_EXT_DL		BIT(10)
-#define VSP1_HAS_NON_ZERO_LBA	BIT(11)
 
 struct vsp1_device_info {
 	u32 version;
@@ -68,7 +66,6 @@ struct vsp1_device_info {
 	unsigned int uif_count;
 	unsigned int wpf_count;
 	unsigned int num_bru_inputs;
-	u8 soc;
 	bool uapi;
 };
 
@@ -82,7 +79,6 @@ struct vsp1_device {
 	void __iomem *mmio;
 	struct rcar_fcp_device *fcp;
 	struct device *bus_master;
-	struct reset_control *rstc;
 
 	struct vsp1_brx *brs;
 	struct vsp1_brx *bru;

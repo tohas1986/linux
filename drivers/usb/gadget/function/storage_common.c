@@ -24,6 +24,7 @@
 #include <linux/file.h>
 #include <linux/fs.h>
 #include <linux/usb/composite.h>
+#include <linux/cdrom.h>
 
 #include "storage_common.h"
 
@@ -241,15 +242,8 @@ int fsg_lun_open(struct fsg_lun *curlun, const char *filename)
 
 	num_sectors = size >> blkbits; /* File size in logic-block-size blocks */
 	min_sectors = 1;
-	if (curlun->cdrom) {
+	if (curlun->cdrom) 
 		min_sectors = 300;	/* Smallest track is 300 frames */
-		if (num_sectors >= 256*60*75) {
-			num_sectors = 256*60*75 - 1;
-			LINFO(curlun, "file too big: %s\n", filename);
-			LINFO(curlun, "using only first %d blocks\n",
-					(int) num_sectors);
-		}
-	}
 	if (num_sectors < min_sectors) {
 		LINFO(curlun, "file too small: %s\n", filename);
 		rc = -ETOOSMALL;
@@ -298,13 +292,7 @@ void store_cdrom_address(u8 *dest, int msf, u32 addr)
 		 * Convert to Minutes-Seconds-Frames.
 		 * Sector size is already set to 2048 bytes.
 		 */
-		addr += 2*75;		/* Lead-in occupies 2 seconds */
-		dest[3] = addr % 75;	/* Frames */
-		addr /= 75;
-		dest[2] = addr % 60;	/* Seconds */
-		addr /= 60;
-		dest[1] = addr;		/* Minutes */
-		dest[0] = 0;		/* Reserved */
+		lba_to_msf(addr, &dest[1], &dest[2], &dest[3]);
 	} else {
 		/* Absolute sector */
 		put_unaligned_be32(addr, dest);
@@ -372,6 +360,15 @@ ssize_t fsg_show_inquiry_string(struct fsg_lun *curlun, char *buf)
 	return sprintf(buf, "%s\n", curlun->inquiry_string);
 }
 EXPORT_SYMBOL_GPL(fsg_show_inquiry_string);
+
+ssize_t fsg_show_stats(struct fsg_lun *curlun, char *buf)
+{
+	return sprintf(buf, "read cnt: %u\n" "read sum: %llu\n"
+		       "write cnt: %u\n" "write sum: %llu\n",
+		       curlun->stats.read.count, curlun->stats.read.bytes,
+		       curlun->stats.write.count, curlun->stats.write.bytes);
+}
+EXPORT_SYMBOL_GPL(fsg_show_stats);
 
 /*
  * The caller must hold fsg->filesem for reading when calling this function.

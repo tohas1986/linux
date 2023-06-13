@@ -81,7 +81,8 @@ int gro_cells_init(struct gro_cells *gcells, struct net_device *dev)
 
 		set_bit(NAPI_STATE_NO_BUSY_POLL, &cell->napi.state);
 
-		netif_napi_add(dev, &cell->napi, gro_cell_poll);
+		netif_napi_add(dev, &cell->napi, gro_cell_poll,
+			       NAPI_POLL_WEIGHT);
 		napi_enable(&cell->napi);
 	}
 	return 0;

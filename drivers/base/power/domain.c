@@ -2085,10 +2085,8 @@ int pm_genpd_init(struct generic_pm_domain *genpd,
 
 	/* Always-on domains must be powered on at initialization. */
 	if ((genpd_is_always_on(genpd) || genpd_is_rpm_always_on(genpd)) &&
-			!genpd_status_on(genpd)) {
-		pr_err("always-on PM domain %s is not on\n", genpd->name);
+			!genpd_status_on(genpd))
 		return -EINVAL;
-	}
 
 	/* Multiple states but no governor doesn't make sense. */
 	if (!gov && genpd->state_count > 1)

@@ -47,8 +47,6 @@
 #include "watchdog_core.h"
 #include "watchdog_pretimeout.h"
 
-#include <trace/events/watchdog.h>
-
 /* the dev_t structure to store the dynamically allocated watchdog devices */
 static dev_t watchdog_devt;
 /* Reference to watchdog device behind /dev/watchdog */
@@ -159,13 +157,10 @@ static int __watchdog_ping(struct watchdog_device *wdd)
 
 	wd_data->last_hw_keepalive = now;
 
-	if (wdd->ops->ping) {
+	if (wdd->ops->ping)
 		err = wdd->ops->ping(wdd);  /* ping the watchdog */
-		trace_watchdog_ping(wdd, err);
-	} else {
+	else
 		err = wdd->ops->start(wdd); /* restart watchdog */
-		trace_watchdog_start(wdd, err);
-	}
 
 	if (err == 0)
 		watchdog_hrtimer_pretimeout_start(wdd);
@@ -264,7 +259,6 @@ static int watchdog_start(struct watchdog_device *wdd)
 		}
 	} else {
 		err = wdd->ops->start(wdd);
-		trace_watchdog_start(wdd, err);
 		if (err == 0) {
 			set_bit(WDOG_ACTIVE, &wdd->status);
 			wd_data->last_keepalive = started_at;
@@ -303,7 +297,6 @@ static int watchdog_stop(struct watchdog_device *wdd)
 	if (wdd->ops->stop) {
 		clear_bit(WDOG_HW_RUNNING, &wdd->status);
 		err = wdd->ops->stop(wdd);
-		trace_watchdog_stop(wdd, err);
 	} else {
 		set_bit(WDOG_HW_RUNNING, &wdd->status);
 	}
@@ -376,7 +369,6 @@ static int watchdog_set_timeout(struct watchdog_device *wdd,
 
 	if (wdd->ops->set_timeout) {
 		err = wdd->ops->set_timeout(wdd, timeout);
-		trace_watchdog_set_timeout(wdd, timeout, err);
 	} else {
 		wdd->timeout = timeout;
 		/* Disable pretimeout if it doesn't fit the new timeout */
@@ -1023,11 +1015,7 @@ static int watchdog_cdev_register(struct watchdog_device *wdd)
 	wd_data->dev.groups = wdd->groups;
 	wd_data->dev.release = watchdog_core_data_release;
 	dev_set_drvdata(&wd_data->dev, wdd);
-	err = dev_set_name(&wd_data->dev, "watchdog%d", wdd->id);
-	if (err) {
-		put_device(&wd_data->dev);
-		return err;
-	}
+	dev_set_name(&wd_data->dev, "watchdog%d", wdd->id);
 
 	kthread_init_work(&wd_data->work, watchdog_ping_work);
 	hrtimer_init(&wd_data->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL_HARD);

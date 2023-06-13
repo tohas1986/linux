@@ -3665,7 +3665,7 @@ out_power_off:
 	return rval;
 }
 
-static void ccs_remove(struct i2c_client *client)
+static int ccs_remove(struct i2c_client *client)
 {
 	struct v4l2_subdev *subdev = i2c_get_clientdata(client);
 	struct ccs_sensor *sensor = to_ccs_sensor(subdev);
@@ -3687,6 +3687,8 @@ static void ccs_remove(struct i2c_client *client)
 	kfree(sensor->ccs_limits);
 	kvfree(sensor->sdata.backing);
 	kvfree(sensor->mdata.backing);
+
+	return 0;
 }
 
 static const struct ccs_device smia_device = {

@@ -1288,8 +1288,9 @@ void pdc_io_reset_devices(void)
 
 #endif /* defined(BOOTLOADER) */
 
-/* locked by pdc_lock */
-static char iodc_dbuf[4096] __page_aligned_bss;
+/* locked by pdc_console_lock */
+static int __attribute__((aligned(8)))   iodc_retbuf[32];
+static char __attribute__((aligned(64))) iodc_dbuf[4096];
 
 /**
  * pdc_iodc_print - Console print using IODC.
@@ -1303,19 +1304,15 @@ static char iodc_dbuf[4096] __page_aligned_bss;
  */
 int pdc_iodc_print(const unsigned char *str, unsigned count)
 {
-	unsigned int i, found = 0;
+	unsigned int i;
 	unsigned long flags;
 
-	count = min_t(unsigned int, count, sizeof(iodc_dbuf));
-
-	spin_lock_irqsave(&pdc_lock, flags);
 	for (i = 0; i < count;) {
 		switch(str[i]) {
 		case '\n':
 			iodc_dbuf[i+0] = '\r';
 			iodc_dbuf[i+1] = '\n';
 			i += 2;
-			found = 1;
 			goto print;
 		default:
 			iodc_dbuf[i] = str[i];
@@ -1325,13 +1322,14 @@ int pdc_iodc_print(const unsigned char *str, unsigned count)
 	}
 
 print:
-	real32_call(PAGE0->mem_cons.iodc_io,
-		(unsigned long)PAGE0->mem_cons.hpa, ENTRY_IO_COUT,
-		PAGE0->mem_cons.spa, __pa(PAGE0->mem_cons.dp.layers),
-		__pa(pdc_result), 0, __pa(iodc_dbuf), i, 0);
-	spin_unlock_irqrestore(&pdc_lock, flags);
+        spin_lock_irqsave(&pdc_lock, flags);
+        real32_call(PAGE0->mem_cons.iodc_io,
+                    (unsigned long)PAGE0->mem_cons.hpa, ENTRY_IO_COUT,
+                    PAGE0->mem_cons.spa, __pa(PAGE0->mem_cons.dp.layers),
+                    __pa(iodc_retbuf), 0, __pa(iodc_dbuf), i, 0);
+        spin_unlock_irqrestore(&pdc_lock, flags);
 
-	return i - found;
+	return i;
 }
 
 #if !defined(BOOTLOADER)
@@ -1356,11 +1354,10 @@ int pdc_iodc_getc(void)
 	real32_call(PAGE0->mem_kbd.iodc_io,
 		    (unsigned long)PAGE0->mem_kbd.hpa, ENTRY_IO_CIN,
 		    PAGE0->mem_kbd.spa, __pa(PAGE0->mem_kbd.dp.layers), 
-		    __pa(pdc_result), 0, __pa(iodc_dbuf), 1, 0);
+		    __pa(iodc_retbuf), 0, __pa(iodc_dbuf), 1, 0);
 
 	ch = *iodc_dbuf;
-	/* like convert_to_wide() but for first return value only: */
-	status = *(int *)&pdc_result;
+	status = *iodc_retbuf;
 	spin_unlock_irqrestore(&pdc_lock, flags);
 
 	if (status == 0)

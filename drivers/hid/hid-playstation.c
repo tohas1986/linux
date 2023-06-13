@@ -108,9 +108,6 @@ struct ps_led_info {
 #define DS_STATUS_CHARGING		GENMASK(7, 4)
 #define DS_STATUS_CHARGING_SHIFT	4
 
-/* Feature version from DualSense Firmware Info report. */
-#define DS_FEATURE_VERSION(major, minor) ((major & 0xff) << 8 | (minor & 0xff))
-
 /*
  * Status of a DualSense touch point contact.
  * Contact IDs, with highest bit set are 'inactive'
@@ -129,7 +126,6 @@ struct ps_led_info {
 #define DS_OUTPUT_VALID_FLAG1_RELEASE_LEDS BIT(3)
 #define DS_OUTPUT_VALID_FLAG1_PLAYER_INDICATOR_CONTROL_ENABLE BIT(4)
 #define DS_OUTPUT_VALID_FLAG2_LIGHTBAR_SETUP_CONTROL_ENABLE BIT(1)
-#define DS_OUTPUT_VALID_FLAG2_COMPATIBLE_VIBRATION2 BIT(2)
 #define DS_OUTPUT_POWER_SAVE_CONTROL_MIC_MUTE BIT(4)
 #define DS_OUTPUT_LIGHTBAR_SETUP_LIGHT_OUT BIT(1)
 
@@ -147,9 +143,6 @@ struct dualsense {
 	struct input_dev *sensors;
 	struct input_dev *touchpad;
 
-	/* Update version is used as a feature/capability version. */
-	uint16_t update_version;
-
 	/* Calibration data for accelerometer and gyroscope. */
 	struct ps_calibration_data accel_calib_data[3];
 	struct ps_calibration_data gyro_calib_data[3];
@@ -160,7 +153,6 @@ struct dualsense {
 	uint32_t sensor_timestamp_us;
 
 	/* Compatible rumble state */
-	bool use_vibration_v2;
 	bool update_rumble;
 	uint8_t motor_left;
 	uint8_t motor_right;
@@ -703,16 +695,18 @@ static ssize_t hardware_version_show(struct device *dev,
 
 static DEVICE_ATTR_RO(hardware_version);
 
-static struct attribute *ps_device_attrs[] = {
+static struct attribute *ps_device_attributes[] = {
 	&dev_attr_firmware_version.attr,
 	&dev_attr_hardware_version.attr,
 	NULL
 };
-ATTRIBUTE_GROUPS(ps_device);
+
+static const struct attribute_group ps_device_attribute_group = {
+	.attrs = ps_device_attributes,
+};
 
 static int dualsense_get_calibration_data(struct dualsense *ds)
 {
-	struct hid_device *hdev = ds->base.hdev;
 	short gyro_pitch_bias, gyro_pitch_plus, gyro_pitch_minus;
 	short gyro_yaw_bias, gyro_yaw_plus, gyro_yaw_minus;
 	short gyro_roll_bias, gyro_roll_plus, gyro_roll_minus;
@@ -723,7 +717,6 @@ static int dualsense_get_calibration_data(struct dualsense *ds)
 	int speed_2x;
 	int range_2g;
 	int ret = 0;
-	int i;
 	uint8_t *buf;
 
 	buf = kzalloc(DS_FEATURE_REPORT_CALIBRATION_SIZE, GFP_KERNEL);
@@ -776,21 +769,6 @@ static int dualsense_get_calibration_data(struct dualsense *ds)
 	ds->gyro_calib_data[2].sens_denom = gyro_roll_plus - gyro_roll_minus;
 
 	/*
-	 * Sanity check gyro calibration data. This is needed to prevent crashes
-	 * during report handling of virtual, clone or broken devices not implementing
-	 * calibration data properly.
-	 */
-	for (i = 0; i < ARRAY_SIZE(ds->gyro_calib_data); i++) {
-		if (ds->gyro_calib_data[i].sens_denom == 0) {
-			hid_warn(hdev, "Invalid gyro calibration data for axis (%d), disabling calibration.",
-					ds->gyro_calib_data[i].abs_code);
-			ds->gyro_calib_data[i].bias = 0;
-			ds->gyro_calib_data[i].sens_numer = DS_GYRO_RANGE;
-			ds->gyro_calib_data[i].sens_denom = S16_MAX;
-		}
-	}
-
-	/*
 	 * Set accelerometer calibration and normalization parameters.
 	 * Data values will be normalized to 1/DS_ACC_RES_PER_G g.
 	 */
@@ -811,21 +789,6 @@ static int dualsense_get_calibration_data(struct dualsense *ds)
 	ds->accel_calib_data[2].bias = acc_z_plus - range_2g / 2;
 	ds->accel_calib_data[2].sens_numer = 2*DS_ACC_RES_PER_G;
 	ds->accel_calib_data[2].sens_denom = range_2g;
-
-	/*
-	 * Sanity check accelerometer calibration data. This is needed to prevent crashes
-	 * during report handling of virtual, clone or broken devices not implementing calibration
-	 * data properly.
-	 */
-	for (i = 0; i < ARRAY_SIZE(ds->accel_calib_data); i++) {
-		if (ds->accel_calib_data[i].sens_denom == 0) {
-			hid_warn(hdev, "Invalid accelerometer calibration data for axis (%d), disabling calibration.",
-					ds->accel_calib_data[i].abs_code);
-			ds->accel_calib_data[i].bias = 0;
-			ds->accel_calib_data[i].sens_numer = DS_ACC_RANGE;
-			ds->accel_calib_data[i].sens_denom = S16_MAX;
-		}
-	}
 
 err_free:
 	kfree(buf);
@@ -851,15 +814,6 @@ static int dualsense_get_firmware_info(struct dualsense *ds)
 
 	ds->base.hw_version = get_unaligned_le32(&buf[24]);
 	ds->base.fw_version = get_unaligned_le32(&buf[28]);
-
-	/* Update version is some kind of feature version. It is distinct from
-	 * the firmware version as there can be many different variations of a
-	 * controller over time with the same physical shell, but with different
-	 * PCBs and other internal changes. The update version (internal name) is
-	 * used as a means to detect what features are available and change behavior.
-	 * Note: the version is different between DualSense and DualSense Edge.
-	 */
-	ds->update_version = get_unaligned_le16(&buf[44]);
 
 err_free:
 	kfree(buf);
@@ -1023,10 +977,7 @@ static void dualsense_output_worker(struct work_struct *work)
 	if (ds->update_rumble) {
 		/* Select classic rumble style haptics and enable it. */
 		common->valid_flag0 |= DS_OUTPUT_VALID_FLAG0_HAPTICS_SELECT;
-		if (ds->use_vibration_v2)
-			common->valid_flag2 |= DS_OUTPUT_VALID_FLAG2_COMPATIBLE_VIBRATION2;
-		else
-			common->valid_flag0 |= DS_OUTPUT_VALID_FLAG0_COMPATIBLE_VIBRATION;
+		common->valid_flag0 |= DS_OUTPUT_VALID_FLAG0_COMPATIBLE_VIBRATION;
 		common->motor_left = ds->motor_left;
 		common->motor_right = ds->motor_right;
 		ds->update_rumble = false;
@@ -1400,21 +1351,6 @@ static struct ps_device *dualsense_create(struct hid_device *hdev)
 		return ERR_PTR(ret);
 	}
 
-	/* Original DualSense firmware simulated classic controller rumble through
-	 * its new haptics hardware. It felt different from classic rumble users
-	 * were used to. Since then new firmwares were introduced to change behavior
-	 * and make this new 'v2' behavior default on PlayStation and other platforms.
-	 * The original DualSense requires a new enough firmware as bundled with PS5
-	 * software released in 2021. DualSense edge supports it out of the box.
-	 * Both devices also support the old mode, but it is not really used.
-	 */
-	if (hdev->product == USB_DEVICE_ID_SONY_PS5_CONTROLLER) {
-		/* Feature version 2.21 introduced new vibration method. */
-		ds->use_vibration_v2 = ds->update_version >= DS_FEATURE_VERSION(2, 21);
-	} else if (hdev->product == USB_DEVICE_ID_SONY_PS5_CONTROLLER_2) {
-		ds->use_vibration_v2 = true;
-	}
-
 	ret = ps_devices_list_add(ps_dev);
 	if (ret)
 		return ERR_PTR(ret);
@@ -1541,6 +1477,12 @@ static int ps_probe(struct hid_device *hdev, const struct hid_device_id *id)
 		}
 	}
 
+	ret = devm_device_add_group(&hdev->dev, &ps_device_attribute_group);
+	if (ret) {
+		hid_err(hdev, "Failed to register sysfs nodes.\n");
+		goto err_close;
+	}
+
 	return ret;
 
 err_close:
@@ -1579,9 +1521,6 @@ static struct hid_driver ps_driver = {
 	.probe		= ps_probe,
 	.remove		= ps_remove,
 	.raw_event	= ps_raw_event,
-	.driver = {
-		.dev_groups = ps_device_groups,
-	},
 };
 
 static int __init ps_init(void)

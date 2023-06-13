@@ -274,7 +274,7 @@ config VMD
 
 config PCIE_BRCMSTB
 	tristate "Broadcom Brcmstb PCIe host controller"
-	depends on ARCH_BRCMSTB || ARCH_BCM2835 || ARCH_BCMBCA || \
+	depends on ARCH_BRCMSTB || ARCH_BCM2835 || ARCH_BCM4908 || \
 		   BMIPS_GENERIC || COMPILE_TEST
 	depends on OF
 	depends on PCI_MSI_IRQ_DOMAIN
@@ -342,6 +342,15 @@ config PCIE_MT7621
 	default SOC_MT7621
 	help
 	  This selects a driver for the MediaTek MT7621 PCIe Controller.
+
+config PCIE_ASPEED
+	bool "ASPEED PCIe controller"
+	depends on PCI
+	depends on OF || COMPILE_TEST
+	select PCI_MSI_ARCH_FALLBACKS
+	help
+	  Say Y here if you want PCIe controller support on
+	  ASPEED SoCs.
 
 source "drivers/pci/controller/dwc/Kconfig"
 source "drivers/pci/controller/mobiveil/Kconfig"

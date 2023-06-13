@@ -31,17 +31,13 @@ struct cached_dirents {
 };
 
 struct cached_fid {
-	struct list_head entry;
-	struct cached_fids *cfids;
-	const char *path;
-	bool has_lease:1;
-	bool is_open:1;
-	bool on_list:1;
+	bool is_valid:1;	/* Do we have a useable root fid */
 	bool file_all_info_is_valid:1;
+	bool has_lease:1;
 	unsigned long time; /* jiffies of when lease was taken */
 	struct kref refcount;
 	struct cifs_fid fid;
-	spinlock_t fid_lock;
+	struct mutex fid_mutex;
 	struct cifs_tcon *tcon;
 	struct dentry *dentry;
 	struct work_struct lease_break;
@@ -49,18 +45,8 @@ struct cached_fid {
 	struct cached_dirents dirents;
 };
 
-#define MAX_CACHED_FIDS 16
-struct cached_fids {
-	/* Must be held when:
-	 * - accessing the cfids->entries list
-	 */
-	spinlock_t cfid_list_lock;
-	int num_entries;
-	struct list_head entries;
-};
-
-extern struct cached_fids *init_cached_dirs(void);
-extern void free_cached_dirs(struct cached_fids *cfids);
+extern struct cached_fid *init_cached_dir(void);
+extern void free_cached_dir(struct cifs_tcon *tcon);
 extern int open_cached_dir(unsigned int xid, struct cifs_tcon *tcon,
 			   const char *path,
 			   struct cifs_sb_info *cifs_sb,
@@ -69,10 +55,8 @@ extern int open_cached_dir_by_dentry(struct cifs_tcon *tcon,
 				     struct dentry *dentry,
 				     struct cached_fid **cfid);
 extern void close_cached_dir(struct cached_fid *cfid);
-extern void drop_cached_dir_by_name(const unsigned int xid,
-				    struct cifs_tcon *tcon,
-				    const char *name,
-				    struct cifs_sb_info *cifs_sb);
+extern void close_cached_dir_lease(struct cached_fid *cfid);
+extern void close_cached_dir_lease_locked(struct cached_fid *cfid);
 extern void close_all_cached_dirs(struct cifs_sb_info *cifs_sb);
 extern void invalidate_all_cached_dirs(struct cifs_tcon *tcon);
 extern int cached_dir_lease_break(struct cifs_tcon *tcon, __u8 lease_key[16]);

@@ -28,12 +28,11 @@ static int lan966x_phylink_mac_prepare(struct phylink_config *config,
 				       phy_interface_t iface)
 {
 	struct lan966x_port *port = netdev_priv(to_net_dev(config->dev));
-	phy_interface_t serdes_mode = iface;
 	int err;
 
 	if (port->serdes) {
 		err = phy_set_mode_ext(port->serdes, PHY_MODE_ETHERNET,
-				       serdes_mode);
+				       iface);
 		if (err) {
 			netdev_err(to_net_dev(config->dev),
 				   "Could not set mode of SerDes\n");
@@ -59,9 +58,6 @@ static void lan966x_phylink_mac_link_up(struct phylink_config *config,
 	port_config->pause = 0;
 	port_config->pause |= tx_pause ? MLO_PAUSE_TX : 0;
 	port_config->pause |= rx_pause ? MLO_PAUSE_RX : 0;
-
-	if (phy_interface_mode_is_rgmii(interface))
-		phy_set_speed(port->serdes, speed);
 
 	lan966x_port_config_up(port);
 }

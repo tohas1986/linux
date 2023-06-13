@@ -477,6 +477,7 @@ mlx5e_tc_sample_offload(struct mlx5e_tc_psample *tc_psample,
 	struct mlx5e_sample_flow *sample_flow;
 	struct mlx5e_sample_attr *sample_attr;
 	struct mlx5_flow_attr *pre_attr;
+	u32 tunnel_id = attr->tunnel_id;
 	struct mlx5_eswitch *esw;
 	u32 default_tbl_id;
 	u32 obj_id;
@@ -521,7 +522,7 @@ mlx5e_tc_sample_offload(struct mlx5e_tc_psample *tc_psample,
 	restore_obj.sample.group_id = sample_attr->group_num;
 	restore_obj.sample.rate = sample_attr->rate;
 	restore_obj.sample.trunc_size = sample_attr->trunc_size;
-	restore_obj.sample.tunnel_id = attr->tunnel_id;
+	restore_obj.sample.tunnel_id = tunnel_id;
 	err = mapping_add(esw->offloads.reg_c0_obj_pool, &restore_obj, &obj_id);
 	if (err)
 		goto err_obj_id;
@@ -547,7 +548,7 @@ mlx5e_tc_sample_offload(struct mlx5e_tc_psample *tc_psample,
 	/* For decap action, do decap in the original flow table instead of the
 	 * default flow table.
 	 */
-	if (attr->action & MLX5_FLOW_CONTEXT_ACTION_DECAP)
+	if (tunnel_id)
 		pre_attr->action |= MLX5_FLOW_CONTEXT_ACTION_DECAP;
 	pre_attr->modify_hdr = sample_flow->restore->modify_hdr;
 	pre_attr->flags = MLX5_ATTR_FLAG_SAMPLE;

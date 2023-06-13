@@ -19,7 +19,6 @@ properties:
 
   codec:
     type: object
-    additionalProperties: false
     properties:
       sound-dai:
         description: List of phandles to the CODEC and HDMI IP nodes.
@@ -31,7 +30,6 @@ properties:
 
   cpu:
     type: object
-    additionalProperties: false
     properties:
       sound-dai:
         description: Phandle to the Samsung I2S controller.

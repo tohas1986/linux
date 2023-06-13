@@ -961,7 +961,7 @@ create_sort_entry(void *key, struct tracing_map_elt *elt)
 static void detect_dups(struct tracing_map_sort_entry **sort_entries,
 		      int n_entries, unsigned int key_size)
 {
-	unsigned int total_dups = 0;
+	unsigned int dups = 0, total_dups = 0;
 	int i;
 	void *key;
 
@@ -974,10 +974,11 @@ static void detect_dups(struct tracing_map_sort_entry **sort_entries,
 	key = sort_entries[0]->key;
 	for (i = 1; i < n_entries; i++) {
 		if (!memcmp(sort_entries[i]->key, key, key_size)) {
-			total_dups++;
+			dups++; total_dups++;
 			continue;
 		}
 		key = sort_entries[i]->key;
+		dups = 0;
 	}
 
 	WARN_ONCE(total_dups > 0,

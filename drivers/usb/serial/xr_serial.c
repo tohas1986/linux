@@ -104,8 +104,7 @@ static int xr21v141x_uart_enable(struct usb_serial_port *port);
 static int xr21v141x_uart_disable(struct usb_serial_port *port);
 static int xr21v141x_fifo_reset(struct usb_serial_port *port);
 static void xr21v141x_set_line_settings(struct tty_struct *tty,
-					struct usb_serial_port *port,
-					const struct ktermios *old_termios);
+		struct usb_serial_port *port, struct ktermios *old_termios);
 
 struct xr_type {
 	int reg_width;
@@ -134,8 +133,8 @@ struct xr_type {
 	int (*disable)(struct usb_serial_port *port);
 	int (*fifo_reset)(struct usb_serial_port *port);
 	void (*set_line_settings)(struct tty_struct *tty,
-				  struct usb_serial_port *port,
-				  const struct ktermios *old_termios);
+			struct usb_serial_port *port,
+			struct ktermios *old_termios);
 };
 
 enum xr_type_id {
@@ -623,8 +622,8 @@ static int xr21v141x_set_baudrate(struct tty_struct *tty, struct usb_serial_port
 }
 
 static void xr_set_flow_mode(struct tty_struct *tty,
-		             struct usb_serial_port *port,
-		             const struct ktermios *old_termios)
+			     struct usb_serial_port *port,
+			     struct ktermios *old_termios)
 {
 	struct xr_data *data = usb_get_serial_port_data(port);
 	const struct xr_type *type = data->type;
@@ -675,8 +674,7 @@ static void xr_set_flow_mode(struct tty_struct *tty,
 }
 
 static void xr21v141x_set_line_settings(struct tty_struct *tty,
-				        struct usb_serial_port *port,
-				        const struct ktermios *old_termios)
+		struct usb_serial_port *port, struct ktermios *old_termios)
 {
 	struct ktermios *termios = &tty->termios;
 	u8 bits = 0;
@@ -734,8 +732,7 @@ static void xr21v141x_set_line_settings(struct tty_struct *tty,
 }
 
 static void xr_cdc_set_line_coding(struct tty_struct *tty,
-				   struct usb_serial_port *port,
-				   const struct ktermios *old_termios)
+		struct usb_serial_port *port, struct ktermios *old_termios)
 {
 	struct xr_data *data = usb_get_serial_port_data(port);
 	struct usb_host_interface *alt = port->serial->interface->cur_altsetting;
@@ -812,8 +809,7 @@ static void xr_cdc_set_line_coding(struct tty_struct *tty,
 }
 
 static void xr_set_termios(struct tty_struct *tty,
-			   struct usb_serial_port *port,
-			   const struct ktermios *old_termios)
+		struct usb_serial_port *port, struct ktermios *old_termios)
 {
 	struct xr_data *data = usb_get_serial_port_data(port);
 

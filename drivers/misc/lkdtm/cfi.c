@@ -20,13 +20,6 @@ static noinline int lkdtm_increment_int(int *counter)
 
 	return *counter;
 }
-
-/* Don't allow the compiler to inline the calls. */
-static noinline void lkdtm_indirect_call(void (*func)(int *))
-{
-	func(&called_count);
-}
-
 /*
  * This tries to call an indirect function with a mismatched prototype.
  */
@@ -36,11 +29,15 @@ static void lkdtm_CFI_FORWARD_PROTO(void)
 	 * Matches lkdtm_increment_void()'s prototype, but not
 	 * lkdtm_increment_int()'s prototype.
 	 */
+	void (*func)(int *);
+
 	pr_info("Calling matched prototype ...\n");
-	lkdtm_indirect_call(lkdtm_increment_void);
+	func = lkdtm_increment_void;
+	func(&called_count);
 
 	pr_info("Calling mismatched prototype ...\n");
-	lkdtm_indirect_call((void *)lkdtm_increment_int);
+	func = (void *)lkdtm_increment_int;
+	func(&called_count);
 
 	pr_err("FAIL: survived mismatched prototype function call!\n");
 	pr_expected_config(CONFIG_CFI_CLANG);
@@ -54,11 +51,7 @@ static void lkdtm_CFI_FORWARD_PROTO(void)
 # ifdef CONFIG_ARM64_BTI_KERNEL
 #  define __no_pac             "branch-protection=bti"
 # else
-#  ifdef CONFIG_CC_HAS_BRANCH_PROT_PAC_RET
-#   define __no_pac            "branch-protection=none"
-#  else
-#   define __no_pac            "sign-return-address=none"
-#  endif
+#  define __no_pac             "branch-protection=none"
 # endif
 # define __no_ret_protection   __noscs __attribute__((__target__(__no_pac)))
 #else

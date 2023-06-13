@@ -200,10 +200,10 @@ static void tb_discover_tunnels(struct tb *tb)
 	}
 }
 
-static int tb_port_configure_xdomain(struct tb_port *port, struct tb_xdomain *xd)
+static int tb_port_configure_xdomain(struct tb_port *port)
 {
 	if (tb_switch_is_usb4(port->sw))
-		return usb4_port_configure_xdomain(port, xd);
+		return usb4_port_configure_xdomain(port);
 	return tb_lc_configure_xdomain(port);
 }
 
@@ -238,7 +238,7 @@ static void tb_scan_xdomain(struct tb_port *port)
 			      NULL);
 	if (xd) {
 		tb_port_at(route, sw)->xdomain = xd;
-		tb_port_configure_xdomain(port, xd);
+		tb_port_configure_xdomain(port);
 		tb_xdomain_add(xd);
 	}
 }
@@ -628,15 +628,11 @@ static void tb_scan_port(struct tb_port *port)
 			 * Downstream switch is reachable through two ports.
 			 * Only scan on the primary port (link_nr == 0).
 			 */
-
-	if (port->usb4)
-		pm_runtime_get_sync(&port->usb4->dev);
-
 	if (tb_wait_for_port(port, false) <= 0)
-		goto out_rpm_put;
+		return;
 	if (port->remote) {
 		tb_port_dbg(port, "port already has a remote\n");
-		goto out_rpm_put;
+		return;
 	}
 
 	tb_retimer_scan(port, true);
@@ -651,12 +647,12 @@ static void tb_scan_port(struct tb_port *port)
 		 */
 		if (PTR_ERR(sw) == -EIO || PTR_ERR(sw) == -EADDRNOTAVAIL)
 			tb_scan_xdomain(port);
-		goto out_rpm_put;
+		return;
 	}
 
 	if (tb_switch_configure(sw)) {
 		tb_switch_put(sw);
-		goto out_rpm_put;
+		return;
 	}
 
 	/*
@@ -685,7 +681,7 @@ static void tb_scan_port(struct tb_port *port)
 
 	if (tb_switch_add(sw)) {
 		tb_switch_put(sw);
-		goto out_rpm_put;
+		return;
 	}
 
 	/* Link the switches using both links if available */
@@ -737,12 +733,6 @@ static void tb_scan_port(struct tb_port *port)
 
 	tb_add_dp_resources(sw);
 	tb_scan_switch(sw);
-
-out_rpm_put:
-	if (port->usb4) {
-		pm_runtime_mark_last_busy(&port->usb4->dev);
-		pm_runtime_put_autosuspend(&port->usb4->dev);
-	}
 }
 
 static void tb_deactivate_and_free_tunnel(struct tb_tunnel *tunnel)
@@ -1452,11 +1442,8 @@ static int tb_start(struct tb *tb)
 	 * ICM firmware upgrade needs running firmware and in native
 	 * mode that is not available so disable firmware upgrade of the
 	 * root switch.
-	 *
-	 * However, USB4 routers support NVM firmware upgrade if they
-	 * implement the necessary router operations.
 	 */
-	tb->root_switch->no_nvm_upgrade = !tb_switch_is_usb4(tb->root_switch);
+	tb->root_switch->no_nvm_upgrade = true;
 	/* All USB4 routers support runtime PM */
 	tb->root_switch->rpm = tb_switch_is_usb4(tb->root_switch);
 
@@ -1557,7 +1544,7 @@ static void tb_restore_children(struct tb_switch *sw)
 
 			tb_restore_children(port->remote->sw);
 		} else if (port->xdomain) {
-			tb_port_configure_xdomain(port, port->xdomain);
+			tb_port_configure_xdomain(port);
 		}
 	}
 }

@@ -28,7 +28,6 @@
 #include <linux/virtio_ring.h>
 
 #include <drm/drm_file.h>
-#include <drm/drm_managed.h>
 
 #include "virtgpu_drv.h"
 
@@ -67,11 +66,10 @@ static void virtio_gpu_get_capsets(struct virtio_gpu_device *vgdev,
 {
 	int i, ret;
 	bool invalid_capset_id = false;
-	struct drm_device *drm = vgdev->ddev;
 
-	vgdev->capsets = drmm_kcalloc(drm, num_capsets,
-				      sizeof(struct virtio_gpu_drv_capset),
-				      GFP_KERNEL);
+	vgdev->capsets = kcalloc(num_capsets,
+				 sizeof(struct virtio_gpu_drv_capset),
+				 GFP_KERNEL);
 	if (!vgdev->capsets) {
 		DRM_ERROR("failed to allocate cap sets\n");
 		return;
@@ -96,7 +94,7 @@ static void virtio_gpu_get_capsets(struct virtio_gpu_device *vgdev,
 
 		if (ret == 0 || invalid_capset_id) {
 			spin_lock(&vgdev->display_info_lock);
-			drmm_kfree(drm, vgdev->capsets);
+			kfree(vgdev->capsets);
 			vgdev->capsets = NULL;
 			spin_unlock(&vgdev->display_info_lock);
 			return;
@@ -112,7 +110,7 @@ static void virtio_gpu_get_capsets(struct virtio_gpu_device *vgdev,
 	vgdev->num_capsets = num_capsets;
 }
 
-int virtio_gpu_init(struct virtio_device *vdev, struct drm_device *dev)
+int virtio_gpu_init(struct drm_device *dev)
 {
 	static vq_callback_t *callbacks[] = {
 		virtio_gpu_ctrl_ack, virtio_gpu_cursor_ack
@@ -125,16 +123,17 @@ int virtio_gpu_init(struct virtio_device *vdev, struct drm_device *dev)
 	u32 num_scanouts, num_capsets;
 	int ret = 0;
 
-	if (!virtio_has_feature(vdev, VIRTIO_F_VERSION_1))
+	if (!virtio_has_feature(dev_to_virtio(dev->dev), VIRTIO_F_VERSION_1))
 		return -ENODEV;
 
-	vgdev = drmm_kzalloc(dev, sizeof(struct virtio_gpu_device), GFP_KERNEL);
+	vgdev = kzalloc(sizeof(struct virtio_gpu_device), GFP_KERNEL);
 	if (!vgdev)
 		return -ENOMEM;
 
 	vgdev->ddev = dev;
 	dev->dev_private = vgdev;
-	vgdev->vdev = vdev;
+	vgdev->vdev = dev_to_virtio(dev->dev);
+	vgdev->dev = dev->dev;
 
 	spin_lock_init(&vgdev->display_info_lock);
 	spin_lock_init(&vgdev->resource_export_lock);
@@ -258,6 +257,7 @@ err_vbufs:
 	vgdev->vdev->config->del_vqs(vgdev->vdev);
 err_vqs:
 	dev->dev_private = NULL;
+	kfree(vgdev);
 	return ret;
 }
 
@@ -296,6 +296,9 @@ void virtio_gpu_release(struct drm_device *dev)
 
 	if (vgdev->has_host_visible)
 		drm_mm_takedown(&vgdev->host_visible_mm);
+
+	kfree(vgdev->capsets);
+	kfree(vgdev);
 }
 
 int virtio_gpu_driver_open(struct drm_device *dev, struct drm_file *file)

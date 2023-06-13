@@ -1666,9 +1666,10 @@ static int cs43130_show_dc(struct device *dev, char *buf, u8 ch)
 	struct cs43130_private *cs43130 = i2c_get_clientdata(client);
 
 	if (!cs43130->hpload_done)
-		return sysfs_emit(buf, "NO_HPLOAD\n");
+		return scnprintf(buf, PAGE_SIZE, "NO_HPLOAD\n");
 	else
-		return sysfs_emit(buf, "%u\n", cs43130->hpload_dc[ch]);
+		return scnprintf(buf, PAGE_SIZE, "%u\n",
+				 cs43130->hpload_dc[ch]);
 }
 
 static ssize_t hpload_dc_l_show(struct device *dev,
@@ -1704,8 +1705,8 @@ static int cs43130_show_ac(struct device *dev, char *buf, u8 ch)
 
 	if (cs43130->hpload_done && cs43130->ac_meas) {
 		for (i = 0; i < ARRAY_SIZE(cs43130_ac_freq); i++) {
-			tmp = sysfs_emit_at(buf, j, "%u\n",
-					    cs43130->hpload_ac[i][ch]);
+			tmp = scnprintf(buf + j, PAGE_SIZE - j, "%u\n",
+					cs43130->hpload_ac[i][ch]);
 			if (!tmp)
 				break;
 
@@ -1714,7 +1715,7 @@ static int cs43130_show_ac(struct device *dev, char *buf, u8 ch)
 
 		return j;
 	} else {
-		return sysfs_emit(buf, "NO_HPLOAD\n");
+		return scnprintf(buf, PAGE_SIZE, "NO_HPLOAD\n");
 	}
 }
 
@@ -2582,7 +2583,7 @@ err_supplies:
 	return ret;
 }
 
-static void cs43130_i2c_remove(struct i2c_client *client)
+static int cs43130_i2c_remove(struct i2c_client *client)
 {
 	struct cs43130_private *cs43130 = i2c_get_clientdata(client);
 
@@ -2609,6 +2610,8 @@ static void cs43130_i2c_remove(struct i2c_client *client)
 
 	pm_runtime_disable(&client->dev);
 	regulator_bulk_disable(CS43130_NUM_SUPPLIES, cs43130->supplies);
+
+	return 0;
 }
 
 static int __maybe_unused cs43130_runtime_suspend(struct device *dev)

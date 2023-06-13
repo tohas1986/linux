@@ -21,6 +21,7 @@
 #include <linux/sched.h>
 #include <linux/slab.h>
 #include <linux/timer.h>
+#include <linux/clk.h>
 
 #include "kcs_bmc_device.h"
 
@@ -115,6 +116,7 @@ struct aspeed_kcs_bmc {
 	struct kcs_bmc_device kcs_bmc;
 
 	struct regmap *map;
+	struct clk *clk;
 
 	struct {
 		enum aspeed_kcs_irq_mode mode;
@@ -207,24 +209,17 @@ static void aspeed_kcs_updateb(struct kcs_bmc_device *kcs_bmc, u32 reg, u8 mask,
 }
 
 /*
- * We note D for Data, and C for Cmd/Status, default rules are
- *
- * 1. Only the D address is given:
- *   A. KCS1/KCS2 (D/C: X/X+4)
- *      D/C: CA0h/CA4h
- *      D/C: CA8h/CACh
- *   B. KCS3 (D/C: XX2/XX3h)
- *      D/C: CA2h/CA3h
- *   C. KCS4 (D/C: X/X+1)
- *      D/C: CA4h/CA5h
- *
- * 2. Both the D/C addresses are given:
- *   A. KCS1/KCS2/KCS4 (D/C: X/Y)
- *      D/C: CA0h/CA1h
- *      D/C: CA8h/CA9h
- *      D/C: CA4h/CA5h
- *   B. KCS3 (D/C: XX2/XX3h)
- *      D/C: CA2h/CA3h
+ * AST_usrGuide_KCS.pdf
+ * 2. Background:
+ *   we note D for Data, and C for Cmd/Status, default rules are
+ *     A. KCS1 / KCS2 ( D / C:X / X+4 )
+ *        D / C : CA0h / CA4h
+ *        D / C : CA8h / CACh
+ *     B. KCS3 ( D / C:XX2h / XX3h )
+ *        D / C : CA2h / CA3h
+ *        D / C : CB2h / CB3h
+ *     C. KCS4
+ *        D / C : CA4h / CA5h
  */
 static int aspeed_kcs_set_address(struct kcs_bmc_device *kcs_bmc, u32 addrs[2], int nr_addrs)
 {
@@ -601,6 +596,20 @@ static int aspeed_kcs_probe(struct platform_device *pdev)
 	if (IS_ERR(priv->map)) {
 		dev_err(&pdev->dev, "Couldn't get regmap\n");
 		return -ENODEV;
+	}
+
+	/* Clock part */
+	priv->clk = devm_clk_get(&pdev->dev, NULL);
+	if (IS_ERR(priv->clk)) {
+		rc = PTR_ERR(priv->clk);
+		if (rc != -EPROBE_DEFER)
+			dev_err(&pdev->dev, "couldn't get clock\n");
+		return rc;
+	}
+	rc = clk_prepare_enable(priv->clk);
+	if (rc) {
+		dev_err(&pdev->dev, "couldn't enable clock\n");
+		return rc;
 	}
 
 	spin_lock_init(&priv->obe.lock);

@@ -12,8 +12,6 @@
 #include <linux/types.h>
 #include <linux/module.h>
 
-struct fwnode_handle;
-
 struct meson_pinctrl;
 
 /**
@@ -133,7 +131,7 @@ struct meson_pinctrl {
 	struct regmap *reg_gpio;
 	struct regmap *reg_ds;
 	struct gpio_chip chip;
-	struct fwnode_handle *fwnode;
+	struct device_node *of_node;
 };
 
 #define FUNCTION(fn)							\

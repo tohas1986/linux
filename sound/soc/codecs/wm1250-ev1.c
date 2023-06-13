@@ -228,9 +228,11 @@ static int wm1250_ev1_probe(struct i2c_client *i2c)
 	return 0;
 }
 
-static void wm1250_ev1_remove(struct i2c_client *i2c)
+static int wm1250_ev1_remove(struct i2c_client *i2c)
 {
 	wm1250_ev1_free(i2c);
+
+	return 0;
 }
 
 static const struct i2c_device_id wm1250_ev1_i2c_id[] = {

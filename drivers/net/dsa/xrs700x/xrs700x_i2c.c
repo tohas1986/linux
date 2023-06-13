@@ -105,14 +105,18 @@ static int xrs700x_i2c_probe(struct i2c_client *i2c,
 	return 0;
 }
 
-static void xrs700x_i2c_remove(struct i2c_client *i2c)
+static int xrs700x_i2c_remove(struct i2c_client *i2c)
 {
 	struct xrs700x *priv = i2c_get_clientdata(i2c);
 
 	if (!priv)
-		return;
+		return 0;
 
 	xrs700x_switch_remove(priv);
+
+	i2c_set_clientdata(i2c, NULL);
+
+	return 0;
 }
 
 static void xrs700x_i2c_shutdown(struct i2c_client *i2c)

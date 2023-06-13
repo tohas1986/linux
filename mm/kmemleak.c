@@ -604,8 +604,9 @@ static int __save_stack_trace(unsigned long *trace)
  * memory block and add it to the object_list and object_tree_root (or
  * object_phys_tree_root).
  */
-static void __create_object(unsigned long ptr, size_t size,
-			    int min_count, gfp_t gfp, bool is_phys)
+static struct kmemleak_object *__create_object(unsigned long ptr, size_t size,
+					     int min_count, gfp_t gfp,
+					     bool is_phys)
 {
 	unsigned long flags;
 	struct kmemleak_object *object, *parent;
@@ -617,7 +618,7 @@ static void __create_object(unsigned long ptr, size_t size,
 	if (!object) {
 		pr_warn("Cannot allocate a kmemleak_object structure\n");
 		kmemleak_disable();
-		return;
+		return NULL;
 	}
 
 	INIT_LIST_HEAD(&object->object_list);
@@ -686,6 +687,7 @@ static void __create_object(unsigned long ptr, size_t size,
 			 */
 			dump_object_info(parent);
 			kmem_cache_free(object_cache, object);
+			object = NULL;
 			goto out;
 		}
 	}
@@ -696,20 +698,21 @@ static void __create_object(unsigned long ptr, size_t size,
 	list_add_tail_rcu(&object->object_list, &object_list);
 out:
 	raw_spin_unlock_irqrestore(&kmemleak_lock, flags);
+	return object;
 }
 
 /* Create kmemleak object which allocated with virtual address. */
-static void create_object(unsigned long ptr, size_t size,
-			  int min_count, gfp_t gfp)
+static struct kmemleak_object *create_object(unsigned long ptr, size_t size,
+					     int min_count, gfp_t gfp)
 {
-	__create_object(ptr, size, min_count, gfp, false);
+	return __create_object(ptr, size, min_count, gfp, false);
 }
 
 /* Create kmemleak object which allocated with physical address. */
-static void create_object_phys(unsigned long ptr, size_t size,
-			       int min_count, gfp_t gfp)
+static struct kmemleak_object *create_object_phys(unsigned long ptr, size_t size,
+					     int min_count, gfp_t gfp)
 {
-	__create_object(ptr, size, min_count, gfp, true);
+	return __create_object(ptr, size, min_count, gfp, true);
 }
 
 /*

@@ -153,11 +153,12 @@ static int smbalert_probe(struct i2c_client *ara,
 }
 
 /* IRQ and memory resources are managed so they are freed automatically */
-static void smbalert_remove(struct i2c_client *ara)
+static int smbalert_remove(struct i2c_client *ara)
 {
 	struct i2c_smbus_alert *alert = i2c_get_clientdata(ara);
 
 	cancel_work_sync(&alert->alert);
+	return 0;
 }
 
 static const struct i2c_device_id smbalert_ids[] = {

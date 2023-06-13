@@ -12,7 +12,6 @@
 #define BSS_FIRST_SECTIONS *(.bss..swapper_pg_dir)
 
 #include <asm-generic/vmlinux.lds.h>
-#include "image-vars.h"
 
 /*
  * Max avaliable Page Size is 64K, so we set SectionAlignment
@@ -54,10 +53,6 @@ SECTIONS
 	_etext = .;
 
 	EXCEPTION_TABLE(16)
-
-	.got : ALIGN(16) { *(.got) }
-	.plt : ALIGN(16) { *(.plt) }
-	.got.plt : ALIGN(16) { *(.got.plt) }
 
 	. = ALIGN(PECOFF_SEGMENT_ALIGN);
 	__init_begin = .;

@@ -174,8 +174,7 @@ static int tmp421_enable_channels(struct tmp421_data *data)
 	int new, i;
 
 	if (old < 0) {
-		dev_err(dev, "error reading register, can't disable channels\n");
-		return old;
+		dev_err(dev, "error reading register, can't disable channels, but who cares...\n");
 	}
 
 	new = old & ~TMP421_CONFIG_REG_REN_MASK;
@@ -187,8 +186,10 @@ static int tmp421_enable_channels(struct tmp421_data *data)
 		return 0;
 
 	err = i2c_smbus_write_byte_data(client, TMP421_CONFIG_REG_2, new);
-	if (err < 0)
+	if (err < 0) {
 		dev_err(dev, "error writing register, can't disable channels\n");
+		err = 0;
+	}
 
 	return err;
 }
@@ -284,10 +285,12 @@ static int tmp421_init_client(struct tmp421_data *data)
 	config = i2c_smbus_read_byte_data(client, TMP421_CONFIG_REG_1);
 	if (config < 0) {
 		dev_err(&client->dev,
-			"Could not read configuration register (%d)\n", config);
-		return config;
+			"Could not read configuration register (%d), setting to zero\n", config);
+		config = 0x00;
 	}
 
+	dev_err(&client->dev,
+			"Configuration register (%d)\n", config);
 	config_orig = config;
 	config &= ~TMP421_CONFIG_SHUTDOWN;
 
@@ -353,7 +356,7 @@ static int tmp421_detect(struct i2c_client *client,
 		return -ENODEV;
 	}
 
-	strscpy(info->type, tmp421_id[kind].name, I2C_NAME_SIZE);
+	strlcpy(info->type, tmp421_id[kind].name, I2C_NAME_SIZE);
 	dev_info(&adapter->dev, "Detected TI %s chip at 0x%02x\n",
 		 names[kind], client->addr);
 

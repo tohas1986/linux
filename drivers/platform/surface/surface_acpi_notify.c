@@ -355,8 +355,7 @@ static u32 san_evt_bat_nf(struct ssam_event_notifier *nf,
 	INIT_DELAYED_WORK(&work->work, san_evt_bat_workfn);
 	work->dev = d->dev;
 
-	work->event = *event;
-	memcpy(work->event.data, event->data, event->length);
+	memcpy(&work->event, event, sizeof(struct ssam_event) + event->length);
 
 	queue_delayed_work(san_wq, &work->work, delay);
 	return SSAM_NOTIF_HANDLED;

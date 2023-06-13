@@ -403,7 +403,7 @@ struct ks8851_net {
 	struct eeprom_93cx6	eeprom;
 	struct regulator	*vdd_reg;
 	struct regulator	*vdd_io;
-	struct gpio_desc	*gpio;
+	int			gpio;
 	struct mii_bus		*mii_bus;
 
 	void			(*lock)(struct ks8851_net *ks,

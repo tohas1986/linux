@@ -484,17 +484,7 @@ static int rpm_idle(struct device *dev, int rpmflags)
 
 	dev->power.idle_notification = true;
 
-	if (dev->power.irq_safe)
-		spin_unlock(&dev->power.lock);
-	else
-		spin_unlock_irq(&dev->power.lock);
-
-	retval = callback(dev);
-
-	if (dev->power.irq_safe)
-		spin_lock(&dev->power.lock);
-	else
-		spin_lock_irq(&dev->power.lock);
+	retval = __rpm_callback(callback, dev);
 
 	dev->power.idle_notification = false;
 	wake_up_all(&dev->power.wait_queue);
@@ -802,13 +792,10 @@ static int rpm_resume(struct device *dev, int rpmflags)
 		DEFINE_WAIT(wait);
 
 		if (rpmflags & (RPM_ASYNC | RPM_NOWAIT)) {
-			if (dev->power.runtime_status == RPM_SUSPENDING) {
+			if (dev->power.runtime_status == RPM_SUSPENDING)
 				dev->power.deferred_resume = true;
-				if (rpmflags & RPM_NOWAIT)
-					retval = -EINPROGRESS;
-			} else {
+			else
 				retval = -EINPROGRESS;
-			}
 			goto out;
 		}
 

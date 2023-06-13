@@ -60,9 +60,6 @@
 #define VMSTOR_PROTO_VERSION_WIN8_1	VMSTOR_PROTO_VERSION(6, 0)
 #define VMSTOR_PROTO_VERSION_WIN10	VMSTOR_PROTO_VERSION(6, 2)
 
-/* channel callback timeout in ms */
-#define CALLBACK_TIMEOUT               2
-
 /*  Packet structure describing virtual storage requests. */
 enum vstor_packet_operation {
 	VSTOR_OPERATION_COMPLETE_IO		= 1,
@@ -303,21 +300,16 @@ enum storvsc_request_type {
 };
 
 /*
- * SRB status codes and masks. In the 8-bit field, the two high order bits
- * are flags, while the remaining 6 bits are an integer status code.  The
- * definitions here include only the subset of the integer status codes that
- * are tested for in this driver.
+ * SRB status codes and masks; a subset of the codes used here.
  */
+
 #define SRB_STATUS_AUTOSENSE_VALID	0x80
 #define SRB_STATUS_QUEUE_FROZEN		0x40
-
-/* SRB status integer codes */
-#define SRB_STATUS_SUCCESS		0x01
-#define SRB_STATUS_ABORTED		0x02
-#define SRB_STATUS_ERROR		0x04
-#define SRB_STATUS_INVALID_REQUEST	0x06
-#define SRB_STATUS_DATA_OVERRUN		0x12
-#define SRB_STATUS_INVALID_LUN		0x20
+#define SRB_STATUS_INVALID_LUN	0x20
+#define SRB_STATUS_SUCCESS	0x01
+#define SRB_STATUS_ABORTED	0x02
+#define SRB_STATUS_ERROR	0x04
+#define SRB_STATUS_DATA_OVERRUN	0x12
 
 #define SRB_STATUS(status) \
 	(status & ~(SRB_STATUS_AUTOSENSE_VALID | SRB_STATUS_QUEUE_FROZEN))
@@ -974,25 +966,38 @@ static void storvsc_handle_error(struct vmscsi_request *vm_srb,
 	void (*process_err_fn)(struct work_struct *work);
 	struct hv_host_device *host_dev = shost_priv(host);
 
-	switch (SRB_STATUS(vm_srb->srb_status)) {
-	case SRB_STATUS_ERROR:
-	case SRB_STATUS_ABORTED:
-	case SRB_STATUS_INVALID_REQUEST:
-		if (vm_srb->srb_status & SRB_STATUS_AUTOSENSE_VALID) {
-			/* Check for capacity change */
-			if ((asc == 0x2a) && (ascq == 0x9)) {
-				process_err_fn = storvsc_device_scan;
-				/* Retry the I/O that triggered this. */
-				set_host_byte(scmnd, DID_REQUEUE);
-				goto do_work;
-			}
+	/*
+	 * In some situations, Hyper-V sets multiple bits in the
+	 * srb_status, such as ABORTED and ERROR. So process them
+	 * individually, with the most specific bits first.
+	 */
 
+	if (vm_srb->srb_status & SRB_STATUS_INVALID_LUN) {
+		set_host_byte(scmnd, DID_NO_CONNECT);
+		process_err_fn = storvsc_remove_lun;
+		goto do_work;
+	}
+
+	if (vm_srb->srb_status & SRB_STATUS_ABORTED) {
+		if (vm_srb->srb_status & SRB_STATUS_AUTOSENSE_VALID &&
+		    /* Capacity data has changed */
+		    (asc == 0x2a) && (ascq == 0x9)) {
+			process_err_fn = storvsc_device_scan;
 			/*
-			 * Otherwise, let upper layer deal with the
-			 * error when sense message is present
+			 * Retry the I/O that triggered this.
 			 */
-			return;
+			set_host_byte(scmnd, DID_REQUEUE);
+			goto do_work;
 		}
+	}
+
+	if (vm_srb->srb_status & SRB_STATUS_ERROR) {
+		/*
+		 * Let upper layer deal with error when
+		 * sense message is present.
+		 */
+		if (vm_srb->srb_status & SRB_STATUS_AUTOSENSE_VALID)
+			return;
 
 		/*
 		 * If there is an error; offline the device since all
@@ -1015,13 +1020,6 @@ static void storvsc_handle_error(struct vmscsi_request *vm_srb,
 		default:
 			set_host_byte(scmnd, DID_ERROR);
 		}
-		return;
-
-	case SRB_STATUS_INVALID_LUN:
-		set_host_byte(scmnd, DID_NO_CONNECT);
-		process_err_fn = storvsc_remove_lun;
-		goto do_work;
-
 	}
 	return;
 
@@ -1031,7 +1029,7 @@ do_work:
 	 */
 	wrk = kmalloc(sizeof(struct storvsc_scan_work), GFP_ATOMIC);
 	if (!wrk) {
-		set_host_byte(scmnd, DID_BAD_TARGET);
+		set_host_byte(scmnd, DID_TARGET_FAILURE);
 		return;
 	}
 
@@ -1206,7 +1204,6 @@ static void storvsc_on_channel_callback(void *context)
 	struct hv_device *device;
 	struct storvsc_device *stor_device;
 	struct Scsi_Host *shost;
-	unsigned long time_limit = jiffies + msecs_to_jiffies(CALLBACK_TIMEOUT);
 
 	if (channel->primary_channel != NULL)
 		device = channel->primary_channel->device_obj;
@@ -1226,11 +1223,6 @@ static void storvsc_on_channel_callback(void *context)
 		u64 rqst_id = desc->trans_id;
 		u32 minlen = rqst_id ? sizeof(struct vstor_packet) :
 			sizeof(enum vstor_packet_operation);
-
-		if (unlikely(time_after(jiffies, time_limit))) {
-			hv_pkt_iter_close(channel);
-			return;
-		}
 
 		if (pktlen < minlen) {
 			dev_err(&device->device,
@@ -1823,9 +1815,6 @@ static int storvsc_queuecommand(struct Scsi_Host *host, struct scsi_cmnd *scmnd)
 	ret = storvsc_do_io(dev, cmd_request, get_cpu());
 	put_cpu();
 
-	if (ret)
-		scsi_dma_unmap(scmnd);
-
 	if (ret == -EAGAIN) {
 		/* no more space */
 		ret = SCSI_MLQUEUE_DEVICE_BUSY;
@@ -2070,7 +2059,7 @@ err_out3:
 err_out2:
 	/*
 	 * Once we have connected with the host, we would need to
-	 * invoke storvsc_dev_remove() to rollback this state and
+	 * to invoke storvsc_dev_remove() to rollback this state and
 	 * this call also frees up the stor_device; hence the jump around
 	 * err_out1 label.
 	 */

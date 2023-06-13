@@ -6,6 +6,8 @@
  */
 
 #include <inttypes.h>
+/* For the CLR_() macros */
+#include <pthread.h>
 
 #include <subcmd/parse-options.h>
 #include "../util/cloexec.h"
@@ -16,7 +18,6 @@
 #include <sched.h>
 #include <stdio.h>
 #include <assert.h>
-#include <debug.h>
 #include <malloc.h>
 #include <signal.h>
 #include <stdlib.h>
@@ -34,7 +35,6 @@
 #include <linux/zalloc.h>
 
 #include "../util/header.h"
-#include "../util/mutex.h"
 #include <numa.h>
 #include <numaif.h>
 
@@ -67,7 +67,7 @@ struct thread_data {
 	u64			system_time_ns;
 	u64			user_time_ns;
 	double			speed_gbs;
-	struct mutex		*process_lock;
+	pthread_mutex_t		*process_lock;
 };
 
 /* Parameters set by options: */
@@ -117,6 +117,7 @@ struct params {
 	long			bytes_thread;
 
 	int			nr_tasks;
+	bool			show_quiet;
 
 	bool			show_convergence;
 	bool			measure_convergence;
@@ -136,16 +137,16 @@ struct params {
 struct global_info {
 	u8			*data;
 
-	struct mutex		startup_mutex;
-	struct cond		startup_cond;
+	pthread_mutex_t		startup_mutex;
+	pthread_cond_t		startup_cond;
 	int			nr_tasks_started;
 
-	struct mutex		start_work_mutex;
-	struct cond		start_work_cond;
+	pthread_mutex_t		start_work_mutex;
+	pthread_cond_t		start_work_cond;
 	int			nr_tasks_working;
 	bool			start_work;
 
-	struct mutex		stop_work_mutex;
+	pthread_mutex_t		stop_work_mutex;
 	u64			bytes_done;
 
 	struct thread_data	*threads;
@@ -197,8 +198,7 @@ static const struct option options[] = {
 	OPT_BOOLEAN('c', "show_convergence", &p0.show_convergence, "show convergence details, "
 		    "convergence is reached when each process (all its threads) is running on a single NUMA node."),
 	OPT_BOOLEAN('m', "measure_convergence",	&p0.measure_convergence, "measure convergence latency"),
-	OPT_BOOLEAN('q', "quiet"	, &quiet,
-		    "quiet mode (do not show any warnings or messages)"),
+	OPT_BOOLEAN('q', "quiet"	, &p0.show_quiet,	"quiet mode"),
 	OPT_BOOLEAN('S', "serialize-startup", &p0.serialize_startup,"serialize thread startup"),
 
 	/* Special option string parsing callbacks: */
@@ -522,6 +522,30 @@ static void * setup_shared_data(ssize_t bytes)
 static void * setup_private_data(ssize_t bytes)
 {
 	return alloc_data(bytes, MAP_PRIVATE, 0, g->p.init_cpu0,  g->p.thp, g->p.init_random);
+}
+
+/*
+ * Return a process-shared (global) mutex:
+ */
+static void init_global_mutex(pthread_mutex_t *mutex)
+{
+	pthread_mutexattr_t attr;
+
+	pthread_mutexattr_init(&attr);
+	pthread_mutexattr_setpshared(&attr, PTHREAD_PROCESS_SHARED);
+	pthread_mutex_init(mutex, &attr);
+}
+
+/*
+ * Return a process-shared (global) condition variable:
+ */
+static void init_global_cond(pthread_cond_t *cond)
+{
+	pthread_condattr_t attr;
+
+	pthread_condattr_init(&attr);
+	pthread_condattr_setpshared(&attr, PTHREAD_PROCESS_SHARED);
+	pthread_cond_init(cond, &attr);
 }
 
 static int parse_cpu_list(const char *arg)
@@ -1196,22 +1220,22 @@ static void *worker_thread(void *__tdata)
 	}
 
 	if (g->p.serialize_startup) {
-		mutex_lock(&g->startup_mutex);
+		pthread_mutex_lock(&g->startup_mutex);
 		g->nr_tasks_started++;
 		/* The last thread wakes the main process. */
 		if (g->nr_tasks_started == g->p.nr_tasks)
-			cond_signal(&g->startup_cond);
+			pthread_cond_signal(&g->startup_cond);
 
-		mutex_unlock(&g->startup_mutex);
+		pthread_mutex_unlock(&g->startup_mutex);
 
 		/* Here we will wait for the main process to start us all at once: */
-		mutex_lock(&g->start_work_mutex);
+		pthread_mutex_lock(&g->start_work_mutex);
 		g->start_work = false;
 		g->nr_tasks_working++;
 		while (!g->start_work)
-			cond_wait(&g->start_work_cond, &g->start_work_mutex);
+			pthread_cond_wait(&g->start_work_cond, &g->start_work_mutex);
 
-		mutex_unlock(&g->start_work_mutex);
+		pthread_mutex_unlock(&g->start_work_mutex);
 	}
 
 	gettimeofday(&start0, NULL);
@@ -1230,17 +1254,17 @@ static void *worker_thread(void *__tdata)
 		val += do_work(thread_data,  g->p.bytes_thread,  0,          1,		l, val);
 
 		if (g->p.sleep_usecs) {
-			mutex_lock(td->process_lock);
+			pthread_mutex_lock(td->process_lock);
 			usleep(g->p.sleep_usecs);
-			mutex_unlock(td->process_lock);
+			pthread_mutex_unlock(td->process_lock);
 		}
 		/*
 		 * Amount of work to be done under a process-global lock:
 		 */
 		if (g->p.bytes_process_locked) {
-			mutex_lock(td->process_lock);
+			pthread_mutex_lock(td->process_lock);
 			val += do_work(process_data, g->p.bytes_process_locked, thread_nr,  g->p.nr_threads,	l, val);
-			mutex_unlock(td->process_lock);
+			pthread_mutex_unlock(td->process_lock);
 		}
 
 		work_done = g->p.bytes_global + g->p.bytes_process +
@@ -1337,9 +1361,9 @@ static void *worker_thread(void *__tdata)
 
 	free_data(thread_data, g->p.bytes_thread);
 
-	mutex_lock(&g->stop_work_mutex);
+	pthread_mutex_lock(&g->stop_work_mutex);
 	g->bytes_done += bytes_done;
-	mutex_unlock(&g->stop_work_mutex);
+	pthread_mutex_unlock(&g->stop_work_mutex);
 
 	return NULL;
 }
@@ -1349,7 +1373,7 @@ static void *worker_thread(void *__tdata)
  */
 static void worker_process(int process_nr)
 {
-	struct mutex process_lock;
+	pthread_mutex_t process_lock;
 	struct thread_data *td;
 	pthread_t *pthreads;
 	u8 *process_data;
@@ -1357,7 +1381,7 @@ static void worker_process(int process_nr)
 	int ret;
 	int t;
 
-	mutex_init(&process_lock);
+	pthread_mutex_init(&process_lock, NULL);
 	set_taskname("process %d", process_nr);
 
 	/*
@@ -1475,7 +1499,7 @@ static int init(void)
 	/* char array in count_process_nodes(): */
 	BUG_ON(g->p.nr_nodes < 0);
 
-	if (quiet && !g->p.show_details)
+	if (g->p.show_quiet && !g->p.show_details)
 		g->p.show_details = -1;
 
 	/* Some memory should be specified: */
@@ -1516,11 +1540,11 @@ static int init(void)
 	g->data = setup_shared_data(g->p.bytes_global);
 
 	/* Startup serialization: */
-	mutex_init_pshared(&g->start_work_mutex);
-	cond_init_pshared(&g->start_work_cond);
-	mutex_init_pshared(&g->startup_mutex);
-	cond_init_pshared(&g->startup_cond);
-	mutex_init_pshared(&g->stop_work_mutex);
+	init_global_mutex(&g->start_work_mutex);
+	init_global_cond(&g->start_work_cond);
+	init_global_mutex(&g->startup_mutex);
+	init_global_cond(&g->startup_cond);
+	init_global_mutex(&g->stop_work_mutex);
 
 	init_thread_data();
 
@@ -1554,7 +1578,7 @@ static void print_res(const char *name, double val,
 	if (!name)
 		name = "main,";
 
-	if (!quiet)
+	if (!g->p.show_quiet)
 		printf(" %-30s %15.3f, %-15s %s\n", name, val, txt_unit, txt_short);
 	else
 		printf(" %14.3f %s\n", val, txt_long);
@@ -1609,17 +1633,17 @@ static int __bench_numa(const char *name)
 		 * Wait for all the threads to start up. The last thread will
 		 * signal this process.
 		 */
-		mutex_lock(&g->startup_mutex);
+		pthread_mutex_lock(&g->startup_mutex);
 		while (g->nr_tasks_started != g->p.nr_tasks)
-			cond_wait(&g->startup_cond, &g->startup_mutex);
+			pthread_cond_wait(&g->startup_cond, &g->startup_mutex);
 
-		mutex_unlock(&g->startup_mutex);
+		pthread_mutex_unlock(&g->startup_mutex);
 
 		/* Wait for all threads to be at the start_work_cond. */
 		while (!threads_ready) {
-			mutex_lock(&g->start_work_mutex);
+			pthread_mutex_lock(&g->start_work_mutex);
 			threads_ready = (g->nr_tasks_working == g->p.nr_tasks);
-			mutex_unlock(&g->start_work_mutex);
+			pthread_mutex_unlock(&g->start_work_mutex);
 			if (!threads_ready)
 				usleep(1);
 		}
@@ -1637,10 +1661,10 @@ static int __bench_numa(const char *name)
 
 		start = stop;
 		/* Start all threads running. */
-		mutex_lock(&g->start_work_mutex);
+		pthread_mutex_lock(&g->start_work_mutex);
 		g->start_work = true;
-		mutex_unlock(&g->start_work_mutex);
-		cond_broadcast(&g->start_work_cond);
+		pthread_mutex_unlock(&g->start_work_mutex);
+		pthread_cond_broadcast(&g->start_work_cond);
 	} else {
 		gettimeofday(&start, NULL);
 	}

@@ -297,11 +297,13 @@ static int ak881x_probe(struct i2c_client *client,
 	return 0;
 }
 
-static void ak881x_remove(struct i2c_client *client)
+static int ak881x_remove(struct i2c_client *client)
 {
 	struct ak881x *ak881x = to_ak881x(client);
 
 	v4l2_device_unregister_subdev(&ak881x->subdev);
+
+	return 0;
 }
 
 static const struct i2c_device_id ak881x_id[] = {

@@ -1313,7 +1313,7 @@ static ssize_t fuse_cache_write_iter(struct kiocb *iocb, struct iov_iter *from)
 			return err;
 
 		if (fc->handle_killpriv_v2 &&
-		    setattr_should_drop_suidgid(&init_user_ns, file_inode(file))) {
+		    should_remove_suid(file_dentry(file))) {
 			goto writethrough;
 		}
 
@@ -2963,9 +2963,11 @@ static long fuse_file_fallocate(struct file *file, int mode, loff_t offset,
 		.mode = mode
 	};
 	int err;
-	bool block_faults = FUSE_IS_DAX(inode) &&
-		(!(mode & FALLOC_FL_KEEP_SIZE) ||
-		 (mode & (FALLOC_FL_PUNCH_HOLE | FALLOC_FL_ZERO_RANGE)));
+	bool lock_inode = !(mode & FALLOC_FL_KEEP_SIZE) ||
+			   (mode & (FALLOC_FL_PUNCH_HOLE |
+				    FALLOC_FL_ZERO_RANGE));
+
+	bool block_faults = FUSE_IS_DAX(inode) && lock_inode;
 
 	if (mode & ~(FALLOC_FL_KEEP_SIZE | FALLOC_FL_PUNCH_HOLE |
 		     FALLOC_FL_ZERO_RANGE))
@@ -2974,20 +2976,22 @@ static long fuse_file_fallocate(struct file *file, int mode, loff_t offset,
 	if (fm->fc->no_fallocate)
 		return -EOPNOTSUPP;
 
-	inode_lock(inode);
-	if (block_faults) {
-		filemap_invalidate_lock(inode->i_mapping);
-		err = fuse_dax_break_layouts(inode, 0, 0);
-		if (err)
-			goto out;
-	}
+	if (lock_inode) {
+		inode_lock(inode);
+		if (block_faults) {
+			filemap_invalidate_lock(inode->i_mapping);
+			err = fuse_dax_break_layouts(inode, 0, 0);
+			if (err)
+				goto out;
+		}
 
-	if (mode & (FALLOC_FL_PUNCH_HOLE | FALLOC_FL_ZERO_RANGE)) {
-		loff_t endbyte = offset + length - 1;
+		if (mode & (FALLOC_FL_PUNCH_HOLE | FALLOC_FL_ZERO_RANGE)) {
+			loff_t endbyte = offset + length - 1;
 
-		err = fuse_writeback_range(inode, offset, endbyte);
-		if (err)
-			goto out;
+			err = fuse_writeback_range(inode, offset, endbyte);
+			if (err)
+				goto out;
+		}
 	}
 
 	if (!(mode & FALLOC_FL_KEEP_SIZE) &&
@@ -3035,7 +3039,8 @@ out:
 	if (block_faults)
 		filemap_invalidate_unlock(inode->i_mapping);
 
-	inode_unlock(inode);
+	if (lock_inode)
+		inode_unlock(inode);
 
 	fuse_flush_time_update(inode);
 

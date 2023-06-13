@@ -8,7 +8,6 @@
  * Copyright (C) 2010 Thomas Langer, <thomas.langer@lantiq.com>
  */
 
-#include <linux/bitfield.h>
 #include <linux/clk.h>
 #include <linux/console.h>
 #include <linux/device.h>
@@ -94,6 +93,7 @@
 #define ASCFSTAT_RXFFLMASK	0x003F
 #define ASCFSTAT_TXFFLMASK	0x3F00
 #define ASCFSTAT_TXFREEMASK	0x3F000000
+#define ASCFSTAT_TXFREEOFF	24
 
 static void lqasc_tx_chars(struct uart_port *port);
 static struct ltq_uart_port *lqasc_port[MAXPORTS];
@@ -137,13 +137,6 @@ static void
 lqasc_stop_tx(struct uart_port *port)
 {
 	return;
-}
-
-static bool lqasc_tx_ready(struct uart_port *port)
-{
-	u32 fstat = __raw_readl(port->membase + LTQ_ASC_FSTAT);
-
-	return FIELD_GET(ASCFSTAT_TXFREEMASK, fstat);
 }
 
 static void
@@ -235,7 +228,8 @@ lqasc_tx_chars(struct uart_port *port)
 		return;
 	}
 
-	while (lqasc_tx_ready(port)) {
+	while (((__raw_readl(port->membase + LTQ_ASC_FSTAT) &
+		ASCFSTAT_TXFREEMASK) >> ASCFSTAT_TXFREEOFF) != 0) {
 		if (port->x_char) {
 			writeb(port->x_char, port->membase + LTQ_ASC_TBUF);
 			port->icount.tx++;
@@ -411,8 +405,8 @@ lqasc_shutdown(struct uart_port *port)
 }
 
 static void
-lqasc_set_termios(struct uart_port *port, struct ktermios *new,
-		  const struct ktermios *old)
+lqasc_set_termios(struct uart_port *port,
+	struct ktermios *new, struct ktermios *old)
 {
 	unsigned int cflag;
 	unsigned int iflag;
@@ -606,12 +600,15 @@ static const struct uart_ops lqasc_pops = {
 static void
 lqasc_console_putchar(struct uart_port *port, unsigned char ch)
 {
+	int fifofree;
+
 	if (!port->membase)
 		return;
 
-	while (!lqasc_tx_ready(port))
-		;
-
+	do {
+		fifofree = (__raw_readl(port->membase + LTQ_ASC_FSTAT)
+			& ASCFSTAT_TXFREEMASK) >> ASCFSTAT_TXFREEOFF;
+	} while (fifofree == 0);
 	writeb(ch, port->membase + LTQ_ASC_TBUF);
 }
 

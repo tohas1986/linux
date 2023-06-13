@@ -24,6 +24,7 @@ properties:
     const: samsung,exynos5433-mic
 
   clocks:
+    minItems: 2
     maxItems: 2
 
   clock-names:

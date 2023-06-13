@@ -715,8 +715,8 @@ references.
 
 .. _backtraces:
 
-Backtraces in commit messages
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Backtraces in commit mesages
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Backtraces help document the call chain leading to a problem. However,
 not all backtraces are helpful. For example, early boot call chains are

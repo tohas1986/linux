@@ -332,15 +332,26 @@ static void rockchip_irq_demux(struct irq_desc *desc)
 {
 	struct irq_chip *chip = irq_desc_get_chip(desc);
 	struct rockchip_pin_bank *bank = irq_desc_get_handler_data(desc);
-	unsigned long pending;
-	unsigned int irq;
+	u32 pend;
 
 	dev_dbg(bank->dev, "got irq for bank %s\n", bank->name);
 
 	chained_irq_enter(chip, desc);
 
-	pending = readl_relaxed(bank->reg_base + bank->gpio_regs->int_status);
-	for_each_set_bit(irq, &pending, 32) {
+	pend = readl_relaxed(bank->reg_base + bank->gpio_regs->int_status);
+
+	while (pend) {
+		unsigned int irq, virq;
+
+		irq = __ffs(pend);
+		pend &= ~BIT(irq);
+		virq = irq_find_mapping(bank->domain, irq);
+
+		if (!virq) {
+			dev_err(bank->dev, "unmapped irq %d\n", irq);
+			continue;
+		}
+
 		dev_dbg(bank->dev, "handling irq %d\n", irq);
 
 		/*
@@ -374,7 +385,7 @@ static void rockchip_irq_demux(struct irq_desc *desc)
 			} while ((data & BIT(irq)) != (data_old & BIT(irq)));
 		}
 
-		generic_handle_domain_irq(bank->domain, irq);
+		generic_handle_irq(virq);
 	}
 
 	chained_irq_exit(chip, desc);
@@ -610,7 +621,6 @@ static int rockchip_gpiolib_register(struct rockchip_pin_bank *bank)
 			return -ENODATA;
 
 		pctldev = of_pinctrl_get(pctlnp);
-		of_node_put(pctlnp);
 		if (!pctldev)
 			return -ENODEV;
 

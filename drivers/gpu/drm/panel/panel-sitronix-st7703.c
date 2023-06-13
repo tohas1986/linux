@@ -598,7 +598,7 @@ static void st7703_shutdown(struct mipi_dsi_device *dsi)
 		dev_err(&dsi->dev, "Failed to disable panel: %d\n", ret);
 }
 
-static void st7703_remove(struct mipi_dsi_device *dsi)
+static int st7703_remove(struct mipi_dsi_device *dsi)
 {
 	struct st7703 *ctx = mipi_dsi_get_drvdata(dsi);
 	int ret;
@@ -612,6 +612,8 @@ static void st7703_remove(struct mipi_dsi_device *dsi)
 	drm_panel_remove(&ctx->panel);
 
 	st7703_debugfs_remove(ctx);
+
+	return 0;
 }
 
 static const struct of_device_id st7703_of_match[] = {

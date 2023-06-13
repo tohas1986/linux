@@ -716,7 +716,7 @@ static struct platform_driver dcdbas_driver = {
 
 static const struct platform_device_info dcdbas_dev_info __initconst = {
 	.name		= DRIVER_NAME,
-	.id		= PLATFORM_DEVID_NONE,
+	.id		= -1,
 	.dma_mask	= DMA_BIT_MASK(32),
 };
 
