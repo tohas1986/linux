@@ -173,6 +173,10 @@
 	status = "okay";
 };
 
+&espi {
+	status = "okay";
+};
+
 &kcs3 {
 	status = "okay";
 	aspeed,lpc-io-reg = <0xca2>;
@@ -184,7 +188,7 @@
 };
 
 &lpc_ctrl {
-	status = "okay";
+	status = "disabled";
 };
 
 &i2c0 {
