@@ -197,6 +197,7 @@
 //
 &i2c1 {
 	//Need TCA9548 descriptor
+	//It works by PCH (selectable by HOST_SMBUS_SEL_N)
 	status = "okay";
 		i2c-mux@73 {
 		compatible = "nxp,pca9548";
@@ -256,6 +257,7 @@
 };
 //
 &i2c2 {
+	//PCH SMLINK
 	status = "okay";
 };
 //
@@ -306,7 +308,13 @@
 //
 &i2c7 {
 	//FRU AT24C256 and PFR
-	status = "disabled";
+	status = "okay";
+
+	eeprom@51 {
+		compatible = "atmel,24c256";
+		reg = <0x51>;
+		label = "fru";
+	};
 };
 //
 &i2c8 {
