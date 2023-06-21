@@ -6,6 +6,7 @@
 #include "aspeed-g6-pinctrl.dtsi"
 #include <dt-bindings/gpio/aspeed-gpio.h>
 #include <dt-bindings/leds/leds-pca955x.h>
+#include <dt-bindings/i2c/i2c.h>
 
 / {
 	model = "OpenYard_BMC";
@@ -182,13 +183,22 @@
 	aspeed,lpc-io-reg = <0xca2>;
 };
 
+&kcs4 {
+	aspeed,lpc-io-reg = <0xCA4>;
+	status = "okay";
+};
+
 &lpc_snoop {
 	status = "okay";
 	snoop-ports = <0x80>, <0x81>;
 };
 
 &lpc_ctrl {
-	status = "disabled";
+	status = "okay";
+};
+
+&lpc_sio {
+	status = "okay";
 };
 
 &i2c0 {
@@ -257,8 +267,17 @@
 };
 //
 &i2c2 {
-	//PCH SMLINK
+	//PCH SMLINK0
 	status = "okay";
+	aspeed,dma-buf-size = <4095>;
+    aspeed,hw-timeout-ms = <300>;
+	bus-frequency = <100000>;
+
+	ipmb@10 {
+		compatible = "ipmb-dev";
+		reg = <(0x10 | I2C_OWN_SLAVE_ADDRESS)>;
+		i2c-protocol;
+	};
 };
 //
 &i2c3 {
@@ -296,12 +315,12 @@
 	};
 	Current_Meter_GPU@41 {
 		compatible = "ti,ina219";
-		reg = <0x42>;
+		reg = <0x41>;
 		shunt-resistor = <1000>; /* = 1 mOhm */
 	};
 	Current_Meter_GPU@44 {
 		compatible = "ti,ina219";
-		reg = <0x48>;
+		reg = <0x44>;
 		shunt-resistor = <1000>; /* = 1 mOhm */
 	};
 };

@@ -40,6 +40,20 @@ config ASPEED_LPC_SNOOP
 	  allows the BMC to listen on and save the data written by
 	  the host to an arbitrary LPC I/O port.
 
+config ASPEED_LPC_MBOX
+	tristate "Aspeed LPC Mailbox Controller"
+	depends on REGMAP && MFD_SYSCON
+	help
+	  Expose the ASPEED LPC MBOX registers found on Aspeed SOCs (AST2400
+	  and AST2500) to userspace.
+
+config ASPEED_LPC_SIO
+	tristate "Aspeed ast2400/2500 HOST LPC SIO support"
+	depends on REGMAP && MFD_SYSCON
+	help
+	  Provides a driver to control the LPC SIO interface on ASPEED platform
+	  through ioctl()s.
+
 config ASPEED_UART_ROUTING
 	tristate "ASPEED uart routing control"
 	select REGMAP
