@@ -479,10 +479,10 @@ static int pca954x_probe(struct i2c_client *client,
 	 * or disconnected state.
 	 */
 	ret = pca954x_init(client, data);
-	if (ret < 0) {
+	/*if (ret < 0) {
 		dev_warn(dev, "probe failed\n");
 		return -ENODEV;
-	}
+	}*/
 
 	ret = pca954x_irq_setup(muxc);
 	if (ret)
