@@ -65,11 +65,6 @@
 		#size-cells = <1>;
 		ranges;
 
-		/*vga_memory: framebuffer@7f000000 {
-            no-map;
-            reg = <0x7f000000 0x01000000>;
-        };*/
-
 		/* VGA region is dictated by hardware strapping */
 		vga_memory: region@9f000000 {
 			no-map;
@@ -83,6 +78,13 @@
             compatible = "shared-dma-pool";
             reusable;
         };*/
+
+		gfx_memory: framebuffer {
+			size = <0x01000000>;
+			alignment = <0x01000000>;
+			compatible = "shared-dma-pool";
+			reusable;
+		};
 
 		video_engine_memory: video {
 			size = <0x04000000>;
@@ -216,7 +218,7 @@
 };
 
 &peci0 {
-	status = "disabled";
+	status = "okay";
 };
 
 &espi {
@@ -546,6 +548,7 @@
 };
 //
 &i2c12 {
+	//PIROM
 	status = "okay";
 };
 //
@@ -609,15 +612,15 @@
 	};
 };
 
-/*&video {
+&video {
 	status = "okay";
 	memory-region = <&video_engine_memory>;
-};*/
-/*
+};
+
 &gfx {
 	status = "okay";
 	memory-region = <&gfx_memory>;
-};*/
+};
 
 &gpio0 {
 	gpio-line-names =
@@ -637,8 +640,8 @@
 	/*N0 - N7*/	"", "", "", "", "", "", "", "",
 	/*O0 - O7*/	"", "", "", "", "", "", "", "",
 	/*P0 - P7*/	"SYS_BMC_PWRBTN_R_N", "SYS_PWRBTN_N", "FP_RST_BTN_N", "FM_BMC_RSTBTN_OUT_N", "", "IRQ_BMC_PCH_NMI_R", "", "",
-	/*Q0 - Q7*/	"", "", "", "", "", "", "", "FP_ID_BTN_SCM_N",
-	/*R0 - R7*/	"", "", "", "", "", "", "", "",
+	/*Q0 - Q7*/	"", "", "", "", "", "", "", "",
+	/*R0 - R7*/	"FP_ID_BTN_SCM_N", "", "", "", "", "", "", "",
 	/*S0 - S7*/	"", "", "", "", "", "", "", "",
 	/*T0 - T7*/	"", "", "", "", "", "", "", "",
 	/*U0 - U7*/	"", "", "", "", "", "", "", "",
